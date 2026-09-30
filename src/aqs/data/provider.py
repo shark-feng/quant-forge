@@ -32,6 +32,7 @@ __all__ = [
     "DataProvider",
     "BACKTEST_REQUIRED",
     "degradation_notes",
+    "filter_effective_window",
 ]
 
 #: 任何市场数据源都必须具备的能力（缺一不可，否则无法回测）
@@ -230,6 +231,37 @@ class DataProvider(Protocol):
     ) -> tuple[list[Any], Provenance]: ...
 
     def fetch_industry(self, symbols: Sequence[str]) -> tuple[pd.DataFrame, Provenance]: ...
+
+
+def filter_effective_window(
+    frame: pd.DataFrame,
+    start: DateLike | None,
+    end: DateLike | None,
+    *,
+    from_col: str = "effective_from",
+    to_col: str = "effective_to",
+) -> pd.DataFrame:
+    """按「生效区间与 ``[start, end]`` **有交集**」筛选（指数成分等区间型数据）。
+
+    这**不是** ``from_col >= start`` —— 那样会把所有「窗口开始前就已生效」的记录全部丢掉，
+    导致指数成分为空 → 股票池退化为全市场 → **幸存者偏差**。
+    正确语义是区间相交：
+
+    ``effective_from <= end`` 且（``effective_to`` 为空 或 ``effective_to >= start``）。
+
+    ``effective_to`` 为空表示「仍在生效」。
+    """
+    if frame is None or len(frame) == 0:
+        return frame if frame is not None else pd.DataFrame()
+
+    mask = pd.Series(True, index=frame.index)
+    if from_col in frame.columns and end is not None:
+        ef = pd.to_datetime(frame[from_col], errors="coerce")
+        mask &= ef.notna() & (ef <= pd.Timestamp(end))
+    if to_col in frame.columns and start is not None:
+        et = pd.to_datetime(frame[to_col], errors="coerce")
+        mask &= et.isna() | (et >= pd.Timestamp(start))
+    return frame.loc[mask].reset_index(drop=True)
 
 
 def degradation_notes(

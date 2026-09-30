@@ -53,6 +53,11 @@ data:
     amount_to_yuan: 1.0
   failure_policy: fallback   # fallback（用本地缓存快照）| fail（抛 DataError）
   max_missing_ratio: 0.01    # 单标的拉取失败比例超过 1% 升级为 error
+  synthetic:                 # 合成数据生成参数（provider=synthetic 时生效；CLI 可覆盖）
+    n_symbols: 30
+    seed: 20240101
+    index_size: 15
+    index_code: "000300.SH"
 
 # ------------------------------- 股票池 -------------------------------------
 universe:

@@ -6,6 +6,9 @@
 
 行为等价于最朴素的 pytest：收集 ``test_*`` 函数与 ``Test*`` 类中的 ``test_*`` 方法，
 不传参调用，断言失败即计为失败。安装 pytest 后可直接用 ``pytest -q``。
+
+**跳过（skip）**：抛出 ``unittest.SkipTest`` 视为跳过并单独计数
+（pytest 原生支持同一写法）。跳过**不计入通过**，以免「环境缺失」被读成「验证通过」。
 """
 
 from __future__ import annotations
@@ -14,6 +17,7 @@ import importlib.util
 import inspect
 import sys
 import traceback
+import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,11 +54,17 @@ def main(argv: list[str]) -> int:
         print(f"未找到匹配的测试文件（pattern={pattern!r}）")
         return 1
 
-    passed = failed = 0
+    passed = failed = skipped = 0
     failures: list[tuple[str, str]] = []
+    skips: list[tuple[str, str]] = []
     for path in files:
         try:
             module = _load_module(path)
+        except unittest.SkipTest as exc:  # pragma: no cover - 模块级跳过
+            skipped += 1
+            skips.append((f"{path.stem} (模块级跳过)", str(exc)))
+            print(f"skip {path.stem} (模块级跳过: {exc})")
+            continue
         except Exception:  # noqa: BLE001
             failed += 1
             failures.append((f"{path.stem} (导入失败)", traceback.format_exc()))
@@ -63,6 +73,10 @@ def main(argv: list[str]) -> int:
             label = f"{path.stem}::{name}"
             try:
                 fn()
+            except unittest.SkipTest as exc:
+                skipped += 1
+                skips.append((label, str(exc)))
+                print(f"skip {label} ({exc})")
             except Exception:  # noqa: BLE001
                 failed += 1
                 failures.append((label, traceback.format_exc()))
@@ -75,7 +89,14 @@ def main(argv: list[str]) -> int:
     for label, tb in failures:
         print(f"\n===== {label} =====")
         print(tb)
-    print(f"\n通过 {passed} 个，失败 {failed} 个（共 {passed + failed} 个用例）")
+    if skips:
+        print("\n----- 跳过（环境不满足，未验证）-----")
+        for label, reason in skips:
+            print(f"skip {label}: {reason}")
+    summary = f"\n通过 {passed} 个，失败 {failed} 个"
+    if skipped:
+        summary += f"，跳过 {skipped} 个"
+    print(summary + f"（共 {passed + failed + skipped} 个用例）")
     return 1 if failed else 0
 
 

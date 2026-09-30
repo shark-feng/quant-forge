@@ -99,19 +99,24 @@ class Rule:
 
 def _render(label: str, cases: int, modules: int) -> str:
     table = {
-        "README 概要行": f"**{cases} 个单元测试用例全部通过**（{modules} 个测试模块）",
+        # 只同步「与机器无关」的数字：收集到的用例数与模块数。
+        # 通过/跳过数依赖本机是否装了可选依赖（如 pyarrow），**不纳入同步**
+        # —— 否则会写出一个在本机为真、在别的机器为假的数字。
+        "README 概要行": f"**{cases} 个单元测试用例**（{modules} 个测试模块）",
         "README 目录树": f"tests/              单元测试（{cases} 个用例）",
         "docs/00 合计行": f"合计 {cases} 个单元测试用例",
         "docs/03 用例总数": f"| 用例总数 | **{cases}** |",
-        "docs/03 通过": f"| 通过 | **{cases}** |",
         "docs/03 模块数": f"| 测试模块 | {modules} 个 |",
         "docs/03 §11 测试行": (
-            f"**{cases} 个用例全部通过**（{modules} 个模块；第一轮 398 → 本轮 {cases}）"
+            f"**收集 {cases} 个用例**（{modules} 个模块；第一轮 398 → 本轮 {cases}）"
         ),
-        "DEVELOPMENT 看板": f"当前测试状态**：{cases} 个用例全绿（{modules} 个测试模块）",
+        "DEVELOPMENT 看板": f"当前测试状态**：{cases} 个用例（{modules} 个测试模块）",
         "CHANGELOG 用例数变化": f"用例数 **398 → {cases}**",
-        "CHANGELOG 通过行": f"通过 {cases} / 失败 0（{modules} 个测试模块）",
-        "docs/17 §8.5 最终状态": f"**最终状态：{cases} 个用例全部通过（{modules} 个测试模块）。**",
+        "CHANGELOG 测试行": (
+            f"收集 **{cases}** 个用例（{modules} 个测试模块）；"
+            "环境门控用例以 skip 列出，不计入通过"
+        ),
+        "docs/17 §8.5 最终状态": f"**最终状态：收集 {cases} 个用例（{modules} 个测试模块）。**",
     }
     return table[label]
 
@@ -124,20 +129,27 @@ def build_rules() -> list[Rule]:
         return f"最新值见 §8.5：{cases} 用例 / {modules} 模块"
 
     return [
-        Rule("README.md", r"\*\*\d+ 个单元测试用例全部通过\*\*（\d+ 个测试模块）", "README 概要行"),
+        Rule("README.md", r"\*\*\d+ 个单元测试用例\*\*（\d+ 个测试模块）", "README 概要行"),
         Rule("README.md", r"tests/ {14}单元测试（\d+ 个用例）", "README 目录树"),
         Rule("docs/00_system_design.md", r"合计 \d+ 个单元测试用例", "docs/00 合计行"),
         Rule("docs/03_acceptance_report.md", r"\|\s*用例总数\s*\|\s*\*\*\d+\*\*\s*\|", "docs/03 用例总数"),
-        Rule("docs/03_acceptance_report.md", r"\|\s*通过\s*\|\s*\*\*\d+\*\*\s*\|", "docs/03 通过"),
         Rule("docs/03_acceptance_report.md", r"\|\s*测试模块\s*\|\s*\d+\s*个\s*\|", "docs/03 模块数"),
         Rule(
             "docs/03_acceptance_report.md",
-            r"\*\*\d+ 个用例全部通过\*\*（\d+ 个模块；第一轮 398 → 本轮 \d+）",
+            r"\*\*收集 \d+ 个用例\*\*（\d+ 个模块；第一轮 398 → 本轮 \d+）",
             "docs/03 §11 测试行",
         ),
-        Rule("docs/DEVELOPMENT.md", r"当前测试状态\*\*：\d+ 个用例全绿（\d+ 个测试模块）", "DEVELOPMENT 看板"),
+        Rule(
+            "docs/DEVELOPMENT.md",
+            r"当前测试状态\*\*：\d+ 个用例（\d+ 个测试模块）",
+            "DEVELOPMENT 看板",
+        ),
         Rule("CHANGELOG.md", r"用例数 \*\*398 → \d+\*\*", "CHANGELOG 用例数变化"),
-        Rule("CHANGELOG.md", r"通过 \d+ / 失败 0（\d+ 个测试模块）", "CHANGELOG 通过行"),
+        Rule(
+            "CHANGELOG.md",
+            r"收集 \*\*\d+\*\* 个用例（\d+ 个测试模块）；环境门控用例以 skip 列出，不计入通过",
+            "CHANGELOG 测试行",
+        ),
         Rule(
             "CHANGELOG.md",
             r"0\.1\.0 轮次新增 \d+ 条",
@@ -146,7 +158,7 @@ def build_rules() -> list[Rule]:
         ),
         Rule(
             "docs/17_round3_diagnostics.md",
-            r"\*\*最终状态：\d+ 个用例全部通过（\d+ 个测试模块）。\*\*",
+            r"\*\*最终状态：收集 \d+ 个用例（\d+ 个测试模块）。\*\*",
             "docs/17 §8.5 最终状态",
         ),
         Rule(

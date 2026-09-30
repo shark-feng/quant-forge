@@ -72,7 +72,14 @@ except ImportError:  # pragma: no cover - 无 pytest 环境
         return _Approx(expected, rel, abs)
 
     def skip(reason: str = "") -> None:  # type: ignore[no-untyped-def]
-        raise AssertionError(f"测试被跳过：{reason}")
+        """跳过当前用例。
+
+        抛 ``unittest.SkipTest``：本项目零依赖运行器与 pytest **都**识别它，
+        且跳过不计入通过（避免「环境缺依赖」被读成「验证通过」）。
+        """
+        import unittest
+
+        raise unittest.SkipTest(reason)
 
     def fixture(*args: Any, **kwargs: Any):  # type: ignore[no-untyped-def]
         def decorator(fn):  # type: ignore[no-untyped-def]

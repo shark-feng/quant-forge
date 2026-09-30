@@ -28,6 +28,7 @@ __all__ = [
     "RateLimitConfig",
     "CacheConfig",
     "UnitConversionConfig",
+    "SyntheticDataConfig",
     "DataConfig",
     "UniverseConfig",
     "MatchingConfig",
@@ -312,6 +313,30 @@ class UnitConversionConfig:
 
 
 @dataclass(slots=True)
+class SyntheticDataConfig:
+    """合成数据生成参数（M4）。
+
+    合成行情用于测试与演示，其规模与种子**同样影响回测结果**，
+    因此必须配置化（不得写成代码里的魔法数字）；CLI 参数会覆盖这里的值。
+    """
+
+    n_symbols: int = 30
+    seed: int = 20240101
+    index_size: int = 15
+    index_code: str = "000300.SH"
+
+    def __post_init__(self) -> None:
+        if self.n_symbols < 1:
+            raise ConfigError(
+                "n_symbols 至少为 1", path="data.synthetic.n_symbols", value=self.n_symbols
+            )
+        if self.index_size < 1:
+            raise ConfigError(
+                "index_size 至少为 1", path="data.synthetic.index_size", value=self.index_size
+            )
+
+
+@dataclass(slots=True)
 class DataConfig:
     provider: str = "synthetic"      # synthetic | csv | parquet | akshare
     root: str = "data/raw"
@@ -330,6 +355,7 @@ class DataConfig:
     unit_conversion: UnitConversionConfig = field(default_factory=UnitConversionConfig)
     failure_policy: str = "fallback"   # fallback（用本地缓存快照）| fail（抛 DataError）
     max_missing_ratio: float = 0.01    # 单标的失败比例阈值，超过升级为 error
+    synthetic: SyntheticDataConfig = field(default_factory=SyntheticDataConfig)
 
     def __post_init__(self) -> None:
         if self.provider not in ("synthetic", "csv", "parquet", "akshare"):
