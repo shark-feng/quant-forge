@@ -265,3 +265,36 @@ def test_readme_links_resolve():
         if not (PROJECT_ROOT / target).exists():
             missing.append(target)
     assert not missing, f"README 链接指向不存在的文件：{missing}"
+
+
+def test_doc_count_sync_tool_rules_all_match():
+    """`tools/sync_doc_counts.py` 的每条规则都必须在当前文档中命中。
+
+    这是该工具的核心安全前提：正则一旦失配（文档改版后），工具会报错而不是
+    「假装成功、实际什么都没改」。这里把同一检查纳入测试，避免工具被改坏后无人发现。
+    """
+    import importlib.util
+    import sys
+
+    tool_path = PROJECT_ROOT / "tools" / "sync_doc_counts.py"
+    assert tool_path.exists(), "缺少 tools/sync_doc_counts.py"
+
+    spec = importlib.util.spec_from_file_location("_sync_doc_counts_probe", tool_path)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["_sync_doc_counts_probe"] = mod
+    spec.loader.exec_module(mod)
+
+    rules = mod.build_rules()
+    assert len(rules) >= 10, f"规则数量异常偏少（{len(rules)}），文档数字守护可能已失效"
+
+    missing: list[str] = []
+    for rule in rules:
+        text = rule.path.read_text(encoding="utf-8")
+        if not rule.regex.search(text):
+            missing.append(f"{rule.path.name}: {rule.label}")
+    assert not missing, "以下同步规则已失配（文档可能改版，需更新正则）：\n" + "\n".join(missing)
+
+    # 分模块表的行正则也必须能命中（否则 docs/03 的逐模块数字会静默过期）
+    doc03 = (PROJECT_ROOT / "docs" / "03_acceptance_report.md").read_text(encoding="utf-8")
+    assert mod.MODULE_ROW.search(doc03), "docs/03 分模块表行正则已失配"

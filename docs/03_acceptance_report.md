@@ -13,10 +13,10 @@
 | 项目 | 结果 |
 | --- | --- |
 | 测试运行方式 | `python tests/run_tests.py`（零依赖运行器，与 pytest 双兼容） |
-| 用例总数 | **605** |
-| 通过 | **605** |
+| 用例总数 | **613** |
+| 通过 | **613** |
 | 失败 | 0 |
-| 测试模块 | 42 个 |
+| 测试模块 | 43 个 |
 | 代码规模 | `src/aqs` 46 个文件约 9.0k 行；`tests` 41 个文件约 6.5k 行 |
 
 分模块用例数：
@@ -64,7 +64,8 @@
 | `test_defect_16_provenance.py` | 11 | **回归 #16** 运行溯源（命令/Git/哈希种子写入 summary.json）+ 文档数字一致性 |
 | `test_determinism.py` | 4 | **回归 #14** 跨进程可复现（两个 PYTHONHASHSEED 下数据与回测完全一致） |
 | `test_no_mojibake.py` | 8 | 编码守护（UTF-8 可解码 / 无 U+FFFD / 无乱码特征串），把 PowerShell 教训变成红灯 |
-| `test_packaging.py` | 20 | **M2 工程化**：许可证一致、依赖分组一致、`.gitignore`/`.gitattributes` 覆盖度、**禁止第三方回测框架进依赖**、上传脚本健壮性、README 链接与 AKShare runbook |
+| `test_packaging.py` | 21 | **M2 工程化**：许可证一致、依赖分组一致、`.gitignore`/`.gitattributes` 覆盖度、**禁止第三方回测框架进依赖**、上传脚本健壮性、README 链接与 AKShare runbook |
+| `test_provider_config.py` | 7 | **M4-1** 取数行为配置：缓存/限流/重试/单位换算的默认值、`base.yaml` 携带、非法值报错、overlay 可达 |
 
 ---
 
@@ -330,5 +331,5 @@ volume `{filled:211, no_quote:66}`（volume 的 11 笔 `expired` 来自 `no_quot
 | 缺陷 #16 报告数字可追溯 | 已修复（`summary.json. diagnostics.invocation`） |
 | D1 口径更正 | `docs/03` §9 重写：口径定义 + 更正记录 + 重新生成后的真实数字 |
 | M2 工程化 | 文件全部交付并本地提交 `2c46504`；**推送待联网环境** |
-| 测试 | **605 个用例全部通过**（42 个模块；第一轮 398 → 本轮 605） |
+| 测试 | **613 个用例全部通过**（43 个模块；第一轮 398 → 本轮 613） |
 | 新增机械守护 | 整手不变量 / 跨进程确定性 / 乱码编码 / 工程化一致性 / 文档数字一致性 |

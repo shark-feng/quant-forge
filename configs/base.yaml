@@ -11,7 +11,7 @@ project:
 
 # ------------------------------- 数据层 -------------------------------------
 data:
-  provider: synthetic        # synthetic | csv | parquet
+  provider: synthetic        # synthetic | csv | parquet | akshare
   root: data/raw
   adjustment: hfq            # 后复权（信号与收益口径）
   calendar:
@@ -26,6 +26,33 @@ data:
   quality:
     strict: true             # true: 质量报告有 error 时直接抛异常
     check_price_limits: true
+  listing_date:
+    policy: strict           # strict（缺 list_date 直接报错）| proxy（显式降级并全程披露）
+
+  # ---- 取数行为（M4；四 provider 共用，差异只在字段映射）----
+  cache:
+    enabled: true
+    root: data/cache         # 已 gitignore
+    version: 1               # schema 版本：字段/口径变更即 +1，旧版本不读也不删
+    fmt: parquet             # parquet | csv（pyarrow 不可用时自动退化并 warning）
+    ttl_hours: 24.0          # 新鲜度；未过期直接命中
+    refresh: false           # true = 强制重抓
+  rate_limit:
+    enabled: true
+    requests_per_minute: 300 # 保守默认，可按探测结果调整
+    burst: 10
+    min_interval_ms: 0.0
+  retry:
+    max_attempts: 5
+    backoff: 1.5             # 指数退避底数
+    jitter: true
+    retry_on: [ConnectionError, TimeoutError, OSError]
+  unit_conversion:
+    # Q3 陷阱：原始数据 volume 为「手」时填 100，否则成交额/参与率/冲击成本整体错 100 倍
+    volume_to_shares: 1.0
+    amount_to_yuan: 1.0
+  failure_policy: fallback   # fallback（用本地缓存快照）| fail（抛 DataError）
+  max_missing_ratio: 0.01    # 单标的拉取失败比例超过 1% 升级为 error
 
 # ------------------------------- 股票池 -------------------------------------
 universe:

@@ -24,6 +24,10 @@ __all__ = [
     "QualityConfig",
     "ListingDateConfig",
     "ExposureControlConfig",
+    "RetryConfig",
+    "RateLimitConfig",
+    "CacheConfig",
+    "UnitConversionConfig",
     "DataConfig",
     "UniverseConfig",
     "MatchingConfig",
@@ -209,6 +213,104 @@ class QualityConfig:
     check_price_limits: bool = True
 
 
+# --------------------------------------------------------------------------- #
+# M4：数据源取数行为配置（缓存 / 限流 / 重试 / 单位换算）
+# --------------------------------------------------------------------------- #
+@dataclass(slots=True)
+class RetryConfig:
+    """取数重试策略（M4）。
+
+    ``retry_on`` 用**异常类名字符串**而非异常类：配置层保持纯数据，
+    不 import 网络异常类型；具体类型在 ``data/ratelimit.py`` 侧解析。
+    """
+
+    max_attempts: int = 5
+    backoff: float = 1.5
+    jitter: bool = True
+    retry_on: tuple[str, ...] = ("ConnectionError", "TimeoutError", "OSError")
+
+    def __post_init__(self) -> None:
+        if self.max_attempts < 1:
+            raise ConfigError("max_attempts 至少为 1", path="data.retry.max_attempts", value=self.max_attempts)
+        if self.backoff < 1.0:
+            raise ConfigError(
+                "backoff 必须 >= 1.0（指数退避底数）", path="data.retry.backoff", value=self.backoff
+            )
+
+
+@dataclass(slots=True)
+class RateLimitConfig:
+    """令牌桶限流（M4）。``requests_per_minute = 0`` 表示不限流。"""
+
+    enabled: bool = True
+    requests_per_minute: int = 300
+    burst: int = 10
+    min_interval_ms: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.requests_per_minute < 0:
+            raise ConfigError(
+                "requests_per_minute 不能为负（0 = 不限流）",
+                path="data.rate_limit.requests_per_minute",
+                value=self.requests_per_minute,
+            )
+        if self.burst < 1:
+            raise ConfigError("burst 至少为 1", path="data.rate_limit.burst", value=self.burst)
+        if self.min_interval_ms < 0:
+            raise ConfigError(
+                "min_interval_ms 不能为负", path="data.rate_limit.min_interval_ms", value=self.min_interval_ms
+            )
+
+
+@dataclass(slots=True)
+class CacheConfig:
+    """本地缓存（M4）。
+
+    ``version`` 是 **schema 版本**：字段或口径变更即 +1，旧版本缓存**不读也不删**
+    （由人工清理），避免新旧 schema 混用产生难以察觉的口径错误。
+    """
+
+    enabled: bool = True
+    root: str = "data/cache"
+    version: int = 1
+    fmt: str = "parquet"           # parquet | csv（pyarrow 不可用时自动退化并 warning）
+    ttl_hours: float = 24.0
+    refresh: bool = False
+
+    def __post_init__(self) -> None:
+        if self.fmt not in ("parquet", "csv"):
+            raise ConfigError("fmt 只能是 parquet/csv", path="data.cache.fmt", value=self.fmt)
+        if self.version < 1:
+            raise ConfigError("version 至少为 1", path="data.cache.version", value=self.version)
+        if self.ttl_hours < 0:
+            raise ConfigError("ttl_hours 不能为负", path="data.cache.ttl_hours", value=self.ttl_hours)
+
+
+@dataclass(slots=True)
+class UnitConversionConfig:
+    """原始数据的成交量/成交额单位换算（M4，专治 Q3「手 → 股」陷阱）。
+
+    真实数据源里 ``volume`` 常见「手」（1 手 = 100 股），``amount`` 偶见「千元」。
+    若误把「手」当「股」，成交额、参与率上限、冲击成本会整体错 100 倍 ——
+    而且**不会报错**，只会让回测结果悄悄失真。因此把换算系数显式配置化。
+    """
+
+    volume_to_shares: float = 1.0    # 股数 = 原始 volume × 该系数（日线为「手」时填 100）
+    amount_to_yuan: float = 1.0      # 元   = 原始 amount × 该系数（千元时填 1000）
+
+    def __post_init__(self) -> None:
+        if self.volume_to_shares <= 0:
+            raise ConfigError(
+                "volume_to_shares 必须为正", path="data.unit_conversion.volume_to_shares",
+                value=self.volume_to_shares,
+            )
+        if self.amount_to_yuan <= 0:
+            raise ConfigError(
+                "amount_to_yuan 必须为正", path="data.unit_conversion.amount_to_yuan",
+                value=self.amount_to_yuan,
+            )
+
+
 @dataclass(slots=True)
 class DataConfig:
     provider: str = "synthetic"      # synthetic | csv | parquet | akshare
@@ -221,6 +323,13 @@ class DataConfig:
     exclude_suspended: bool = True
     quality: QualityConfig = field(default_factory=QualityConfig)
     listing_date: "ListingDateConfig" = field(default_factory=lambda: ListingDateConfig())
+    # ---- M4：取数行为（平铺，四 provider 共用；差异只在字段映射）----
+    cache: CacheConfig = field(default_factory=CacheConfig)
+    rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
+    retry: RetryConfig = field(default_factory=RetryConfig)
+    unit_conversion: UnitConversionConfig = field(default_factory=UnitConversionConfig)
+    failure_policy: str = "fallback"   # fallback（用本地缓存快照）| fail（抛 DataError）
+    max_missing_ratio: float = 0.01    # 单标的失败比例阈值，超过升级为 error
 
     def __post_init__(self) -> None:
         if self.provider not in ("synthetic", "csv", "parquet", "akshare"):
@@ -231,6 +340,14 @@ class DataConfig:
             raise ConfigError("adjustment 只能是 hfq/none", path="data.adjustment", value=self.adjustment)
         if self.min_list_days < 0:
             raise ConfigError("min_list_days 不能为负", path="data.min_list_days", value=self.min_list_days)
+        if self.failure_policy not in ("fallback", "fail"):
+            raise ConfigError(
+                "failure_policy 只能是 fallback/fail", path="data.failure_policy", value=self.failure_policy
+            )
+        if not (0.0 <= self.max_missing_ratio <= 1.0):
+            raise ConfigError(
+                "max_missing_ratio 应在 [0, 1]", path="data.max_missing_ratio", value=self.max_missing_ratio
+            )
 
 
 @dataclass(slots=True)
