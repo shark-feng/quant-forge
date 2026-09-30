@@ -1,0 +1,36 @@
+# 策略一：均线交叉（MA5 上穿 MA20 买入 / 下穿卖出）
+# 参数合法性由策略类在构造时校验：未知参数键、非法窗口、非法价格字段都会直接报错。
+strategy:
+  name: ma_cross
+  class: aqs.strategy.ma_cross.MACrossStrategy
+
+  params:
+    fast_window: 5             # 快线周期
+    slow_window: 20            # 慢线周期（必须 > fast_window）
+    price_field: close_adj     # 使用后复权收盘价（信号口径）
+    include_exits: true        # 是否输出死叉卖出信号
+
+  signal:
+    buy: "ma_fast[T] > ma_slow[T] and ma_fast[T-1] <= ma_slow[T-1]"
+    sell: "ma_fast[T] < ma_slow[T] and ma_fast[T-1] >= ma_slow[T-1]"
+    score: "(ma_fast - ma_slow) / ma_slow"
+
+  # 股票池口径 → 映射到 DataConfig（见 aqs.strategy.registry.filters_to_data_overrides）
+  filters:
+    exclude_st: true
+    exclude_suspended: true
+    min_list_days: 60
+    liquidity_window: 20
+    min_amount: 50000000
+
+  # 撮合口径（引擎消费；信号在 T 日收盘产生，订单在 T+1 开盘执行）
+  execution:
+    price: open
+    max_defer_days: 5
+
+  # 组合口径（M4 组合层消费；策略层不做仓位决策）
+  portfolio:
+    weighting: equal
+    max_positions: 10
+    max_weight_per_symbol: 0.10
+    allow_reentry: true

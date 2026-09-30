@@ -1,0 +1,107 @@
+# =============================================================================
+# 风控 RMS 配置（第一阶段：规则阈值 + 动作；实现在 M5，本轮仅配置文件占位）
+# 规则按 priority 从小到大依次执行；触发 reject 立即短路，触发 reduce/pause 记录后继续。
+# =============================================================================
+risk:
+  enabled: true
+
+  # 全局开关与运行模式
+  mode: enforce              # enforce（实时拦截）| observe（只记录不拦截，用于调参）
+  audit_log: reports/rms_audit.jsonl
+  hot_reload: true           # 支持配置文件热更新（M5 实现）
+
+  rules:
+    # ---------------- 订单级 ----------------
+    - name: max_order_quantity
+      priority: 10
+      action: reduce           # 超限则削减数量
+      params: { max_quantity: 1000000 }        # 单笔最大股数
+
+    - name: max_order_notional
+      priority: 11
+      action: reduce
+      params: { max_notional: 2000000.0 }      # 单笔最大金额（元）
+
+    - name: price_deviation
+      priority: 20
+      action: reject
+      params:
+        max_deviation: 0.05     # 限价单相对最新价偏离上限 5%
+        enabled: true
+
+    - name: order_frequency
+      priority: 30
+      action: reject
+      params:
+        max_orders_per_minute: 30              # 程序化交易频率限制（仿真）
+        max_orders_per_day: 2000
+
+    - name: cancel_ratio
+      priority: 31
+      action: pause
+      params:
+        max_cancel_ratio: 0.8   # 撤单率超过 80% 暂停当日交易
+        min_orders_for_check: 50
+
+    # ---------------- 账户/持仓级 ----------------
+    - name: max_trade_volume_daily
+      priority: 40
+      action: reduce
+      params: { max_daily_volume_ratio: 0.20 }  # 单日累计不超过 ADV 的 20%
+
+    - name: max_position_per_symbol
+      priority: 50
+      action: reduce
+      params: { max_weight: 0.10 }              # 单票市值占总资产上限
+
+    - name: industry_exposure
+      priority: 60
+      action: reduce
+      params:
+        max_industry_weight: 0.30               # 单行业暴露上限
+        industry_map: null                      # 行业分类文件（M5 接入）
+
+    - name: gross_exposure
+      priority: 70
+      action: reject
+      params:
+        max_gross_exposure: 1.00                # 总市值敞口 ≤ 100%（禁止杠杆）
+        allow_short: false                      # 禁止卖空
+
+    - name: cash_sufficiency
+      priority: 80
+      action: reduce
+      params: { min_cash_ratio: 0.02 }
+
+    # ---------------- 损失/回撤级 ----------------
+    - name: daily_loss_limit
+      priority: 90
+      action: pause
+      params:
+        max_daily_loss: 0.03    # 当日亏损 3% -> 暂停当日新开仓
+        pause_minutes: 0        # 日频回测下等价于暂停当日剩余交易
+
+    - name: max_drawdown_action
+      priority: 100
+      action: force_close
+      params:
+        warn_drawdown: 0.10     # 回撤 10% -> 预警
+        reduce_drawdown: 0.15   # 回撤 15% -> 减仓至半仓
+        reduce_exposure: 0.5    # 减仓后的目标敞口比例
+        force_close_drawdown: 0.20  # 回撤 20% -> 强制平仓并停止策略
+
+    # ---------------- 风险计量（历史模拟法） ----------------
+    - name: portfolio_var_limit
+      priority: 110
+      action: reduce
+      params:
+        max_var: 0.03           # 组合 1 日 VaR 上限 3%（占总资产）
+        confidence: 0.95
+        horizon: 1
+        window: 60              # 历史收益窗口（交易日）
+        min_obs: 30             # 样本不足时该规则跳过（并记录原因）
+
+  # 实时预警推送（回调接口，M5 实现）
+  alerts:
+    enabled: true
+    channels: [log]             # log | callback

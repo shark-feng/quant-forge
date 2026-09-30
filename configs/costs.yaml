@@ -1,0 +1,43 @@
+# =============================================================================
+# 成本敏感性测试场景：用于「成本加倍后策略是否仍有效」的验收
+# 用法：BaseConfig 加载 base.yaml 后，用 overlay 覆盖 costs 段
+# =============================================================================
+scenarios:
+  baseline:
+    description: 基准成本（佣金万2.5、印花税0.05%、滑点0.1%）
+    overlay:
+      costs:
+        scale: 1.0
+
+  double_cost:
+    description: 全部成本加倍（验收：策略是否仍有效）
+    overlay:
+      costs:
+        scale: 2.0
+
+  triple_cost:
+    description: 全部成本三倍（极保守假设）
+    overlay:
+      costs:
+        scale: 3.0
+
+  high_slippage:
+    description: 滑点 0.3%（流动性差的假设）
+    overlay:
+      costs:
+        slippage:
+          prop_bps: 30.0
+
+  no_impact:
+    description: 关闭冲击成本（仅做对照）
+    overlay:
+      costs:
+        impact:
+          enabled: false
+
+  pessimistic_commission:
+    description: 佣金万5 + 最低10元
+    overlay:
+      costs:
+        commission_rate: 0.0005
+        min_commission: 10.0

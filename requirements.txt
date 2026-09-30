@@ -1,0 +1,15 @@
+# 核心运行依赖（第一阶段）
+numpy>=1.24
+pandas>=2.0
+PyYAML>=6.0
+
+# 第二阶段科学计算
+# scipy>=1.10
+# statsmodels>=0.14
+# cvxpy>=1.4
+
+# 数据 IO（Parquet 加速，可选）
+# pyarrow>=14.0
+
+# 测试
+# pytest>=7.4

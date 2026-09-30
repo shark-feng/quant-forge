@@ -1,0 +1,32 @@
+# 策略三：成交量配合（放量上涨买入 / 放量下跌卖出）
+strategy:
+  name: volume
+  class: aqs.strategy.volume.VolumeStrategy
+
+  params:
+    volume_window: 20           # 均量窗口
+    volume_ratio: 1.5           # 放量阈值：volume[T] > mean(volume[T-20..T-1]) × 1.5
+    volume_ma_exclude_today: true   # 均量基准不含当日（合同「过去 20 日平均成交量」口径）
+    price_field: close_adj
+    include_exits: true
+
+  signal:
+    buy: "close_adj[T] > close_adj[T-1] and volume[T] > volume_ma × 1.5"
+    sell: "close_adj[T] < close_adj[T-1] and volume[T] > volume_ma × 1.5"
+    score: "volume[T] / volume_ma"
+
+  filters:
+    exclude_st: true
+    exclude_suspended: true
+    min_list_days: 60
+    liquidity_window: 20
+    min_amount: 50000000
+
+  execution:
+    price: open
+    max_defer_days: 5
+
+  portfolio:
+    weighting: equal
+    max_positions: 10
+    max_weight_per_symbol: 0.10

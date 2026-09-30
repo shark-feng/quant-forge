@@ -1,0 +1,113 @@
+# =============================================================================
+# A 股量化研究系统 —— 主配置（第一阶段）
+# 原则：所有影响回测结果的参数都在这里，代码中不允许出现魔法数字。
+# 单位约定：比率用小数（0.00025 = 万2.5），金额用元，数量用股。
+# =============================================================================
+
+project:
+  name: aqs
+  seed: 20240101            # 随机种子（合成数据/蒙特卡洛可复现）
+  timezone: Asia/Shanghai
+
+# ------------------------------- 数据层 -------------------------------------
+data:
+  provider: synthetic        # synthetic | csv | parquet
+  root: data/raw
+  adjustment: hfq            # 后复权（信号与收益口径）
+  calendar:
+    source: derived          # derived（由行情日期派生）| file
+    file: null
+  min_list_days: 60          # 上市不足 60 个交易日剔除
+  liquidity:
+    window: 20               # 日均成交额窗口
+    min_amount: 50000000     # 5000 万元
+  exclude_st: true
+  exclude_suspended: true
+  quality:
+    strict: true             # true: 质量报告有 error 时直接抛异常
+    check_price_limits: true
+
+# ------------------------------- 股票池 -------------------------------------
+universe:
+  mode: index                # index | all | file
+  index_code: "000300.SH"
+  history_file: null
+  fallback_to_all: true      # 指数成分缺失时退化为全市场
+
+# ------------------------------- 回测引擎 -----------------------------------
+engine:
+  start: 2018-01-01
+  end: 2023-12-31
+  initial_cash: 1000000.0
+  execution_price: open      # open | vwap | close（T+1 成交价口径）
+  t_plus_one: true
+  lot_size: 100
+  max_defer_days: 5          # 涨停/停牌/无报价 -> 顺延天数上限
+  matching:
+    max_participation: 0.10  # 单日成交不超过当日成交量的 10%
+    allow_partial_fill: true
+    limit_up_fill_prob: 0.0  # 涨停板可成交概率（敏感性测试用，默认不可成交）
+    slippage_price_adjust: true
+  price_limit:
+    enabled: true
+    use_provided_limits: true
+    main_board_pct: 0.10
+    gem_pct: 0.20            # 创业板 300xxx / 科创板 688xxx
+    st_pct: 0.05
+    round_to_cent: true
+  benchmark: ["000300.SH", "000905.SH", "000852.SH"]
+
+# ------------------------------- 成本模型 -----------------------------------
+costs:
+  fixed_fee_per_order: 0.0
+  commission_rate: 0.00025   # 佣金 万2.5，双向
+  min_commission: 5.0        # 单笔最低佣金（元）
+  transfer_fee_rate: 0.00001 # 过户费 0.001%，双向
+  stamp_tax:
+    # 按生效日期分段（卖方单边征收）
+    schedule:
+      - { effective_from: 1990-01-01, rate: 0.001 }
+      - { effective_from: 2023-08-28, rate: 0.0005 }
+  slippage:
+    fixed_bps: 0.0           # 固定滑点（基点）
+    prop_bps: 10.0           # 比例滑点 0.1% = 10 bps
+  impact:
+    enabled: true
+    eta: 0.1                 # 冲击成本 η
+    theta: 0.5               # 冲击成本 θ（Q/ADV 的指数）
+    advisory_window: 20      # ADV 计算窗口（交易日）
+  scale: 1.0                 # 全局成本倍数（敏感性测试：2.0 = 成本加倍）
+
+# ------------------------------- 组合层 -------------------------------------
+portfolio:
+  weighting: equal           # equal | score_prop（凯利用于控制总敞口，见下）
+  max_positions: 10
+  max_weight_per_symbol: 0.10
+  cash_buffer: 0.02          # 现金缓冲比例（不投入交易）
+  allow_reentry: true        # 卖出后是否允许再次买入同一标的
+  rebalance: false           # true=按目标权重调仓；false=仅信号驱动卖出（低换手）
+  kelly:
+    enabled: false
+    mode: binary             # binary（胜率/赔率）| continuous（μ/σ²）
+    fraction: 0.5            # 半凯利
+    cap: 1.0                 # 总敞口上限
+    min_trades: 20           # 启用凯利所需的最小平仓样本数
+    initial_exposure: 1.0    # 样本不足时的敞口
+
+# ------------------------------- 风控 RMS -----------------------------------
+risk:
+  enabled: true
+  config_file: configs/risk.yaml
+
+# ------------------------------- 策略 ---------------------------------------
+strategy:
+  name: ma_cross             # ma_cross | breakout | volume
+  config_file: configs/strategies/ma_cross.yaml
+
+# ------------------------------- 输出 ---------------------------------------
+report:
+  output_dir: reports
+  save_trades: true
+  save_positions: true
+  save_equity_curve: true
+  benchmark: ["000300.SH", "000905.SH", "000852.SH"]

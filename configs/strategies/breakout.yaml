@@ -1,0 +1,36 @@
+# 策略二：价格突破（收盘价创 20 日新高买入 / 创 20 日新低卖出）
+strategy:
+  name: breakout
+  class: aqs.strategy.breakout.BreakoutStrategy
+
+  params:
+    window: 20                 # 突破窗口
+    exclude_today: true        # 与「过去 20 日（不含 T 日）」比较；设为 false 会直接报错
+    price_field: close_adj     # 收盘价口径
+    high_field: high_adj       # 前高口径
+    low_field: low_adj         # 前低口径
+    confirm_volume: false      # 是否要求突破当日放量确认
+    volume_window: 20
+    volume_ratio: 1.5
+    include_exits: true
+
+  signal:
+    buy: "close_adj[T] > max(high_adj[T-20..T-1])"
+    sell: "close_adj[T] < min(low_adj[T-20..T-1])"
+    score: "close_adj[T] / prior_high - 1"
+
+  filters:
+    exclude_st: true
+    exclude_suspended: true
+    min_list_days: 60
+    liquidity_window: 20
+    min_amount: 50000000
+
+  execution:
+    price: open
+    max_defer_days: 5
+
+  portfolio:
+    weighting: equal
+    max_positions: 10
+    max_weight_per_symbol: 0.10
