@@ -80,22 +80,36 @@
 
 **当前测试状态**：600 个用例全绿（42 个测试模块）。
 
-### 第三轮（诊断阶段）
+### 第三轮（诊断 + 修复 + 工程化）
 
 | 里程碑 | 模块 | 文档 | 实现 | 测试 | 状态 |
 |---|---|---|---|---|---|
-| D1 | 报告口径澄清与更正 | ✅ `17_round3_diagnostics.md` §1 | 文档已更正 | 待补数字一致性红灯 | **诊断完成，待确认** |
-| D2 | 缺陷 #13 订单整手（四层根因） | ✅ `17_round3_diagnostics.md` §2~§3 | — | — | **诊断完成，待确认** |
-| D3 | `reject_reason` 字段语义 | ✅ `17_round3_diagnostics.md` §4 | — | — | **诊断完成，待确认** |
-| D4 | 缺陷 #14 结果不可复现 | ✅ `17_round3_diagnostics.md` §5 | ✅（1 行） | 待补跨进程用例 | **已修，待确认** |
-| M2~M9 | 见第二轮里程碑表 | — | — | — | D1~D3 确认后开工 |
+| D1 | 报告口径澄清与更正 | ✅ `17_round3_diagnostics.md` §1 | ✅ 文档已更正 | ✅ 数字一致性红灯 | **已交付** |
+| D2 | 缺陷 #13 订单整手（四层根因） | ✅ `17_round3_diagnostics.md` §2~§3、§8.2 | ✅ 全部修复 | ✅ 28 条 | **已交付** |
+| D3 | `reject_reason` 字段语义 | ✅ `17_round3_diagnostics.md` §4、`02_engine_skeleton.md` §5.1 | ✅ 字段拆列 | ✅ 8 条 | **已交付** |
+| D4 | 缺陷 #14 结果不可复现 | ✅ `17_round3_diagnostics.md` §5 | ✅（1 行 + 跨进程守护） | ✅ 4 条 | **已交付** |
+| — | 缺陷 #16 运行溯源 | ✅ `17_round3_diagnostics.md` §8.3 | ✅ `core/provenance.py` | ✅ 11 条 | **已交付** |
+| M2 | R2-02 工程化 / GitHub 同步 | ✅ README / NOTICE / CHANGELOG | ✅ 工程化文件全部就绪，已本地提交 `2c46504` | ✅ 19 条 | ⚠️ **推送未完成**（本机无外网，见下） |
+| M3 | R2-03 框架边界纪律 | ✅ `12_framework_matrix.md` | ✅ 见本文件 §7 | — | 待补许可证核实项 |
+| M4~M9 | 见第二轮里程碑表 | — | — | — | 待开工 |
 
-> ⚠️ **协作教训（第二轮记录，第三轮再次违反）**：不要用 PowerShell 的 `Get-Content`/`Set-Content` 管道
+> ⚠️ **M2 推送说明**：本机开发环境**对外 HTTPS 全部不可达**（`git ls-remote` /
+> `curl` 访问 github.com、api.github.com、pypi.org、baidu.com 均失败：
+> schannel `SEC_E_NO_CREDENTIALS`、openssl `Connection was reset`）。
+> 因此 M2 的工程化文件已全部交付并**本地提交**，但 `git push` 必须在联网环境执行：
+>
+> ```powershell
+> pwsh -File tools\upload_github.ps1 -NoCommit
+> ```
+>
+> 脚本内置密钥扫描、测试门禁与 `git pull --rebase`（避免覆盖远端已有内容）。
+
+> ⚠️ **协作教训（第二轮记录，第三轮又违反两次）**：不要用 PowerShell 的 `Get-Content`/`Set-Content` 管道
 > 对含中文的 UTF-8 文件做批量替换 —— 会以 GBK 解码再回写，造成整文件乱码。
 > 文件修改统一使用编辑器/`edit` 工具。
 > **第三轮补充**：即使 `pwsh 7`（`Get-Content` 默认 UTF-8）也会因 `-replace` + `Set-Content` 组合
-> 破坏中文与换行，实测两次均导致文件不可用。纪律改为**绝对禁止**，并新增机械化红灯
-> `tests/test_no_mojibake.py` 扫描乱码特征（不依赖人的记忆力）。
+> 破坏中文与换行，实测三次均导致文件不可用。纪律改为**绝对禁止**，并新增机械化红灯
+> `tests/test_no_mojibake.py`（8 条）——本次它已成功拦住过我自己的错误写法。
 
 ## 7. 框架边界纪律（第二轮新增，来源 `docs/12_framework_matrix.md`）
 

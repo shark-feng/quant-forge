@@ -499,6 +499,26 @@ D1 的更正要求「报告数字必须来自实际落盘文件」，而 D4 使*
   无已知乱码特征串、特征字不误伤常用汉字、检测器灵敏度哨兵。
 - `PYTHONHASHSEED` 仍未由 CLI 固定：当前实现做到「与哈希顺序无关」，
   且 `summary.json` 的 `invocation` 已记录该环境变量，便于人工复现。
+- **文档数字一致性**：`tests/test_defect_16_provenance.py` 直接比对 `docs/03` §9.2
+  与 `reports/*/trades.csv`；`tests/test_defect_11_docs_consistency.py` 新增
+  `docs/00` 与 `CHANGELOG` 的用例数守护（该处此前停留在第一轮的 398）。
+
+### 8.5 M2 工程化（已完成，推送待联网）
+
+| 交付物 | 状态 |
+| --- | --- |
+| `LICENSE`（MIT） | ✅ 与 `docs/12` §5 的许可证策略一致，由 `tests/test_packaging.py` 校验 |
+| `NOTICE`（署名 / 第三方清单 / 合规 / 待核实项 / 密钥扫描流程） | ✅ |
+| `.gitignore`（data/cache、reports、.tmp_*、*.parquet、凭据类文件） | ✅ |
+| `.gitattributes`（默认 LF、Windows 脚本 CRLF、二进制类型） | ✅ 经验证零 renormalize 改动 |
+| `pyproject.toml` 依赖分组（core / science / data / dev / all） | ✅ 禁止第三方回测框架进依赖，由测试守护 |
+| `requirements.txt` 与 pyproject 分组一致 | ✅ 由测试守护 |
+| `CHANGELOG.md`（0.0.0 / 0.0.1 / 0.1.0） | ✅ |
+| `README` 的 AKShare 数据准备 runbook + 报告与数字纪律 | ✅ |
+| 提交前密钥扫描 | ✅ 扫描受控文件与未跟踪文件，命中项全部为扫描规则自身的文档说明 |
+| `tools/upload_github.ps1`（含 `pull --rebase` 防覆盖） | ✅ |
+| 本地提交 | ✅ `2c46504`（69 文件，+9126/−390） |
+| **推送到 GitHub** | ❌ **本机无外网**（对外 HTTPS 全部不可达），需在联网环境执行 |
 
 **最终状态：600 个用例全部通过（42 个测试模块）。**
 
