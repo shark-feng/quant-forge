@@ -83,10 +83,20 @@ D:\Quantify\
 │       ├── breakout.yaml            ✅
 │       └── volume.yaml              ✅
 ├── docs\                            ✅
-│   ├── 00_system_design.md          ✅ 本文
-│   ├── 01_data_layer.md             ✅ 数据层接口/伪代码/测试用例
-│   ├── 02_engine_skeleton.md        ✅ 引擎骨架接口/伪代码/测试用例
-│   ├── DEVELOPMENT.md               ✅ 开发方式合同（一模块一交付、验收门禁）
+│   ├── 00_system_design.md          ✅ 本文（总体设计）
+│   ├── 01_data_layer.md             ✅ M1 数据层接口/伪代码/测试用例
+│   ├── 02_engine_skeleton.md        ✅ M2 引擎骨架（含 §5.1 订单字段语义）
+│   ├── 03_acceptance_report.md      ✅ 阶段验收报告（含 §9 口径定义与更正记录）
+│   ├── 04_strategy_layer.md         ✅ M3 策略层
+│   ├── 05_portfolio_layer.md        ✅ M4 组合层
+│   ├── 06_risk_rms.md               ✅ M5 风控 RMS
+│   ├── 10_round2_design.md          ✅ 第二轮设计总纲（含 12 条缺陷修复设计）
+│   ├── 11_akshare_provider.md       ✅ AKShare 数据源设计（字段映射/缓存/限流/质量）
+│   ├── 12_framework_matrix.md       ✅ 框架选型矩阵与主引擎边界
+│   ├── 12_appendix_verification.md  ✅ 选型待核实项 V1~V6 可执行清单（联网执行）
+│   ├── 13_metrics.md                ✅ M6 评价层设计
+│   ├── 17_round3_diagnostics.md     ✅ 第三轮诊断报告（D1~D4 + 实施结果）
+│   ├── DEVELOPMENT.md               ✅ 开发方式合同（一模块一交付、验收门禁、报告纪律）
 │   └── RISK_DISCLAIMER.md           ✅ 风险与合规声明
 ├── data\                            ✅ 目录占位（raw/processed/index/fundamental）
 │   ├── raw\.gitkeep
@@ -320,7 +330,7 @@ for d in trading_days:
 | R3  | M2 引擎骨架（事件/循环/撮合/成本/账务/T+1）+ 单测           | ✅ 已交付     |
 | R4  | M3 策略层（指标库/均线交叉/价格突破/成交量配合/注册表）+ 单测       | ✅ 已交付     |
 | R5  | M4 组合层（等权/单票上限/最大持仓/现金管理/凯利）+ M5 风控 RMS（13 条规则/VaR/验收指标）+ 引擎接入 | ✅ 已交付 |
-| —   | 合计 600 个单元测试用例全部通过（零依赖运行器 / pytest 双兼容）   | ✅       |
+| —   | 合计 605 个单元测试用例全部通过（零依赖运行器 / pytest 双兼容）   | ✅       |
 | R6  | M6 评价层 + M7 报告层，输出第一份完整回测报告               | ⏭ 待确认后开工 |
 | R7  | 偏差与压力测试套件（未来函数/幸存者/过拟合/成本敏感性/极端行情）        | ⏭        |
 | R8+ | 第二阶段：多因子/优化/GARCH/协整                      | ⏭        |

@@ -13,8 +13,8 @@
 | 项目 | 结果 |
 | --- | --- |
 | 测试运行方式 | `python tests/run_tests.py`（零依赖运行器，与 pytest 双兼容） |
-| 用例总数 | **600** |
-| 通过 | **600** |
+| 用例总数 | **605** |
+| 通过 | **605** |
 | 失败 | 0 |
 | 测试模块 | 42 个 |
 | 代码规模 | `src/aqs` 46 个文件约 9.0k 行；`tests` 41 个文件约 6.5k 行 |
@@ -58,13 +58,13 @@
 | `test_defect_09_volume_ratio_guard.py` | 13 | **回归 #9** 量比基准阈值 |
 | `test_defect_10_test_hygiene.py` | 6 | **回归 #10** 测试代码坏味道（AST 守护） |
 | `test_defect_12_demo_scope.py` | 12 | **回归 #12** 数据口径四元组与 CLI |
-| `test_defect_11_docs_consistency.py` | 11 | **回归 #11** 文档与代码一致性（AST/正则守护；含 docs/00 与 CHANGELOG 数字守护） |
+| `test_defect_11_docs_consistency.py` | 12 | **回归 #11** 文档与代码一致性（AST/正则守护；含 docs/00 与 CHANGELOG 数字守护、选型待核实项附录指引） |
 | `test_defect_15_order_field_semantics.py` | 8 | **回归 #15** 订单字段语义（final_status / last_reject_reason / 顺延历史） |
-| `test_defect_13_lot_rounding.py` | 28 | **回归 #13** 整手不变量 INV-1~INV-6（削减取整 / 零头过期 / 小数股防线 / 端到端） |
+| `test_defect_13_lot_rounding.py` | 31 | **回归 #13** 整手不变量 INV-1~INV-6（削减取整 / 零头过期 / 小数股防线 / 端到端 / DROPPED 终态） |
 | `test_defect_16_provenance.py` | 11 | **回归 #16** 运行溯源（命令/Git/哈希种子写入 summary.json）+ 文档数字一致性 |
 | `test_determinism.py` | 4 | **回归 #14** 跨进程可复现（两个 PYTHONHASHSEED 下数据与回测完全一致） |
 | `test_no_mojibake.py` | 8 | 编码守护（UTF-8 可解码 / 无 U+FFFD / 无乱码特征串），把 PowerShell 教训变成红灯 |
-| `test_packaging.py` | 19 | **M2 工程化**：许可证一致、依赖分组一致、`.gitignore`/`.gitattributes` 覆盖度、**禁止第三方回测框架进依赖**、README 链接与 AKShare runbook |
+| `test_packaging.py` | 20 | **M2 工程化**：许可证一致、依赖分组一致、`.gitignore`/`.gitattributes` 覆盖度、**禁止第三方回测框架进依赖**、上传脚本健壮性、README 链接与 AKShare runbook |
 
 ---
 
@@ -330,5 +330,5 @@ volume `{filled:211, no_quote:66}`（volume 的 11 笔 `expired` 来自 `no_quot
 | 缺陷 #16 报告数字可追溯 | 已修复（`summary.json. diagnostics.invocation`） |
 | D1 口径更正 | `docs/03` §9 重写：口径定义 + 更正记录 + 重新生成后的真实数字 |
 | M2 工程化 | 文件全部交付并本地提交 `2c46504`；**推送待联网环境** |
-| 测试 | **600 个用例全部通过**（42 个模块；第一轮 398 → 本轮 600） |
+| 测试 | **605 个用例全部通过**（42 个模块；第一轮 398 → 本轮 605） |
 | 新增机械守护 | 整手不变量 / 跨进程确定性 / 乱码编码 / 工程化一致性 / 文档数字一致性 |

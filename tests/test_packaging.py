@@ -221,6 +221,33 @@ def test_upload_script_exists_and_guards_against_overwrite():
     assert "quant-forge" in text
 
 
+def test_upload_script_scan_is_robust_and_non_interactive():
+    """Q3 修正的守护：扫描不拼路径列表、支持非交互、计数显式转 int。"""
+    text = UPLOAD_SCRIPT.read_text(encoding="utf-8")
+
+    # (1) 不得把受控文件路径列表拼进 git grep 命令行（文件多时会超出命令行长度上限）
+    assert "-- $tracked" not in text, "密钥扫描不应拼接 $tracked 路径列表"
+    # 用词边界匹配「独立的 $tracked 变量」：`$trackedCount` 这类派生变量不算违规
+    assert not re.search(r"\$tracked\b", text), "应移除独立的 $tracked 变量"
+
+    # (2) 必须提供非交互开关，且命中密钥时不再无条件 Read-Host
+    assert "[switch]$NonInteractive" in text, "缺少 -NonInteractive 开关"
+    assert "if ($NonInteractive) {" in text, "非交互模式下必须先中止而不是询问"
+
+    # (3) 领先提交数必须显式转 int（避免字符串比较的隐式转换）
+    assert "[int](git rev-list --count" in text, "localAhead 应显式转换为 int"
+
+    # (4) 未跟踪文件也必须纳入扫描（git grep 只扫受控文件）
+    assert "ls-files --others --exclude-standard" in text, "必须额外扫描未跟踪文件"
+
+    # (5) 含中文的 .ps1 必须带 UTF-8 BOM
+    #     否则 PowerShell 5.1 与 Parser::ParseFile 会按系统 ANSI（GBK）读取，
+    #     中文变乱码、字符串终止符被破坏，进而报出一堆假语法错误（已实测踩到）。
+    assert UPLOAD_SCRIPT.read_bytes().startswith(b"\xef\xbb\xbf"), (
+        "含中文的 .ps1 必须带 UTF-8 BOM，否则非 UTF-8 默认编码的 PowerShell 会读成乱码"
+    )
+
+
 def test_readme_documents_akshare_runbook():
     text = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
     assert "AKShare 数据准备" in text

@@ -263,6 +263,44 @@ def test_true_hard_reject_still_counts():
 
 
 # --------------------------------------------------------------------------- #
+# 2b. DROPPED 必须是终态（Q1 澄清项）
+# --------------------------------------------------------------------------- #
+def test_dropped_is_terminal():
+    """`OrderStatus.DROPPED` 必须在 `_TERMINAL_STATUSES` 中。
+
+    若它被当成「非终态」，被丢弃的订单会一直留在 `broker.working` 里，
+    并在每个交易日重复参与撮合 —— 正是缺陷 #13 想消除的行为。
+    """
+    assert OrderStatus.DROPPED.is_terminal is True
+    assert OrderStatus.DROPPED.is_active is False
+
+
+def test_dropped_order_not_resubmittable():
+    """已 drop 的订单不得再次提交（`Broker.submit` 必须抛 EngineError）。"""
+    broker = make_broker()
+    order = broker.create_order(SYM, Side.BUY, 1000.0, signal_date=D[0], submit_date=D[1])
+    order.drop(RejectReason.BELOW_LOT, day=D[1])
+
+    assert order.status is OrderStatus.DROPPED
+    with raises(EngineError):
+        broker.submit(order)
+    # 未进入撮合队列，也没有成交
+    assert order not in broker.working
+    assert broker.stats.submitted == 0
+
+
+def test_dropped_order_is_not_counted_as_rejected():
+    """DROPPED 不计入拒单（口径：拒单率只看 rejected / risk_rejected）。"""
+    broker = make_broker()
+    order = broker.create_order(SYM, Side.BUY, 1000.0, signal_date=D[0], submit_date=D[1])
+    order.drop(RejectReason.BELOW_LOT, day=D[1])
+    assert broker.stats.rejected == 0
+    row = order.to_dict()
+    assert row["final_status"] == "dropped"
+    assert row["last_reject_reason"] == "below_lot"
+
+
+# --------------------------------------------------------------------------- #
 # 3. D2-d：削减不得让 filled > quantity；剩余为 0 不再顺延
 # --------------------------------------------------------------------------- #
 def test_reduce_cannot_push_quantity_below_filled():

@@ -178,3 +178,21 @@ def test_framework_matrix_states_single_main_engine():
     assert "自研" in text
     assert "主引擎" in text
     assert "GPL" in text, "必须写明 Backtrader 的许可证风险"
+
+
+def test_framework_matrix_marks_pending_items_and_links_appendix():
+    """M3：`docs/12` 的待核实项必须显式标注并指向 appendix，不得含糊带过。"""
+    text = read(DOCS / "12_framework_matrix.md")
+    assert "12_appendix_verification.md" in text, "docs/12 必须链接到核实清单附录"
+    # 每个待核实点都要能追到 appendix 的哪一项
+    for item in ("V1", "V2", "V3"):
+        assert f"appendix {item}" in text, f"docs/12 缺少到 appendix {item} 的指引"
+    assert "待核实（见 appendix）" in text, "矩阵中的待核实项必须显式标注出处"
+
+    appendix = read(DOCS / "12_appendix_verification.md")
+    for item in ("V1", "V2", "V3", "V4", "V5", "V6"):
+        assert f"## {item}" in appendix, f"appendix 缺少 {item} 小节"
+    # 每项都必须给出：目标 URL / 核实命令 / 回填位置 / 降级处置
+    for key in ("候选仓库 URL", "核实命令", "回填位置", "降级处置"):
+        assert key in appendix, f"appendix 缺少必需要素：{key}"
+    assert "不执行任何拉取" in appendix, "appendix 必须写明沙箱不执行拉取"

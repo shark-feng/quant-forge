@@ -396,7 +396,7 @@ cur_list = sorted(s for s in current if not _is_delisted(delist_of[s], ts))
 | --- | --- |
 | `PYTHONHASHSEED` = 0 / 12345 / 777 三次运行 | 订单 704、成交 703、收益 `-15.7304910938%` **完全一致** |
 | 逐日决策指纹（universe/signals/plans/orders/fills） | **完全一致**（0 处差异） |
-| 全套单元测试 | **通过 520 个，失败 0 个** |
+| 全套单元测试 | **通过 520 个，失败 0 个**（此数为该阶段快照，最新值见 §8.5：605 用例 / 42 模块） |
 
 ### 5.4 为什么我在确认前就改了这一行（自我说明）
 
@@ -459,11 +459,11 @@ D1 的更正要求「报告数字必须来自实际落盘文件」，而 D4 使*
 | 任务 | 实现 | 回归用例 | 结果 |
 | --- | --- | --- | --- |
 | D3 字段语义 | `Order.defer/expire/cancel/mark_rejected/drop` 记录 `deferred_reasons`/`rejected_on`；`to_dict` 拆出 `final_status`/`last_reject_reason`/`deferred_reasons`/`rejected_on`/`rejected_before_final`，并保留过渡期别名 | `test_defect_15_order_field_semantics.py`（8 条） | ✅ 全绿 |
-| D2 整手不变量 | 新增 `src/aqs/core/quantity.py`（唯一实现）；`RiskContext.lot_size` + `RiskRule.normalize_quantity`；`RuleRiskEngine` 统一收口 + `below_lot` 语义；`OrderStatus.DROPPED`；`broker._apply_reduce` 按 remaining 封顶（INV-6）+ 零头/零剩余判 EXPIRED；`matching` 零剩余不可重试 + `residue_quantity`；`control` 只产出整数股；`account.apply_fill` 拒绝小数股 | `test_defect_13_lot_rounding.py`（28 条） | ✅ 全绿 |
+| D2 整手不变量 | 新增 `src/aqs/core/quantity.py`（唯一实现）；`RiskContext.lot_size` + `RiskRule.normalize_quantity`；`RuleRiskEngine` 统一收口 + `below_lot` 语义；`OrderStatus.DROPPED`（**已确认在 `_TERMINAL_STATUSES` 中**）；`broker._apply_reduce` 按 remaining 封顶（INV-6）+ 零头/零剩余判 EXPIRED；`matching` 零剩余不可重试 + `residue_quantity`；`control` 只产出整数股；`account.apply_fill` 拒绝小数股 | `test_defect_13_lot_rounding.py`（31 条） | ✅ 全绿 |
 | D4 可复现性 | `synthetic.py` set 迭代 → `sorted` | 跨进程用例（见 §8.4） | ✅ 已修 |
 | D1 数字可追溯 | 新增 `src/aqs/core/provenance.py`；`summary.json` 记录 `diagnostics.invocation`（命令行/Git/Python/PYTHONHASHSEED）；三份报告重新生成 | `test_defect_16_provenance.py`（11 条） | ✅ 全绿 |
 
-**全套测试：556 个用例全部通过（38 个测试模块）。**
+**全套测试：556 个用例全部通过（38 个测试模块）。**（此数为该阶段快照，最新值见 §8.5：605 用例 / 42 模块）
 
 ### 8.2 D2 修复前后对比（30 只标的、2022-01-04~2023-12-29，`tools/diag_lot_invariants.py` 实测）
 
@@ -520,7 +520,91 @@ D1 的更正要求「报告数字必须来自实际落盘文件」，而 D4 使*
 | 本地提交 | ✅ `2c46504`（69 文件，+9126/−390） |
 | **推送到 GitHub** | ❌ **本机无外网**（对外 HTTPS 全部不可达），需在联网环境执行 |
 
-**最终状态：600 个用例全部通过（42 个测试模块）。**
+**最终状态：605 个用例全部通过（42 个测试模块）。**
+
+> **各阶段测试数快照对照**（每处数字都是**该阶段当时**的实测值，不是笔误）：
+>
+> | 位置 | 阶段 | 用例数 | 模块数 |
+> | --- | --- | --- | --- |
+> | §5.3 | D4 修复验证（第三轮诊断阶段） | 520 | 36 |
+> | §8.1 | D1~D3 / D4 实施完成（M2 之前） | 556 | 38 |
+> | §8.4 | 补齐编码与确定性守护后 | 600 | 42 |
+> | **§8.5 / 本处** | **M2 工程化 + Q1 终态守护 + Q3 脚本守护 + M3 附录指引（最新）** | **605** | **42** |
+>
+> 唯一权威值以本节（§8.5）为准；其余处的数字保留作为阶段留痕。
+> `docs/03` 与 `README` 的数字由 `tests/test_defect_11_docs_consistency.py` 机械守护。
+
+---
+
+## 9. 开工前确认项 Q1~Q3 的结论
+
+### 9.1 Q1：`OrderStatus.DROPPED` 是否在终态集合
+
+**结论：已在，无需修复。**
+
+`src/aqs/core/enums.py` 第 90 行显式包含 `OrderStatus.DROPPED`：
+
+```python
+_TERMINAL_STATUSES = frozenset({
+    OrderStatus.FILLED, OrderStatus.CANCELLED, OrderStatus.EXPIRED,
+    OrderStatus.REJECTED, OrderStatus.RISK_REJECTED, OrderStatus.DROPPED,
+})
+```
+
+自检命令（宿主机执行）：
+
+```powershell
+python -c "from aqs.core.enums import OrderStatus; print([s.value for s in OrderStatus if s.is_terminal])"
+# 预期含 'dropped'
+```
+
+**为什么这条必须确认**：`DROPPED` 若不在终态集合，被丢弃的订单会一直留在
+`broker.working` 中并在每个交易日重复参与撮合 —— 那正是缺陷 #13 要消除的行为。
+
+**本次补充的守护用例**（3 条，不因「已正确」而省略，因为它守的是不变量而非缺陷现场）：
+
+| 用例 | 断言 |
+| --- | --- |
+| `test_dropped_is_terminal` | `DROPPED.is_terminal is True` 且 `is_active is False` |
+| `test_dropped_order_not_resubmittable` | 已 drop 的订单再 `broker.submit()` → `EngineError`；未进入 `working`；`stats.submitted == 0` |
+| `test_dropped_order_is_not_counted_as_rejected` | `stats.rejected == 0`；`final_status == "dropped"` 且 `last_reject_reason == "below_lot"` |
+
+`Broker.submit` 的守卫（`src/aqs/engine/broker.py`）：
+
+```python
+if order.status.is_terminal:
+    raise EngineError(f"订单 {order.order_id} 已处于终态 {order.status.value}，无法提交")
+```
+
+### 9.2 Q2：`docs/17` 用例数的阶段对应关系
+
+原文 §5.3 写 520、§8.1 写 556，都是**各自阶段当时的实测值**，
+但未说明对应关系，容易被读成前后矛盾。处置：
+
+1. §5.3 与 §8.1 各加「此数为该阶段快照，最新值见 §8.5」的标注；
+2. 附录 B 的 `520` 同样标注；
+3. §8.5 增加**阶段快照对照表**（520 / 556 / 600 / 605 各自对应哪个阶段、模块数多少），
+   并明确「唯一权威值以 §8.5 为准，其余保留作阶段留痕」。
+
+### 9.4 Q1 的补充守护用例数量
+
+Q1 确认「已在终态集合，无需修复」后，仍补了 3 条守护用例（见 §9.1），
+另因 Q3 修正补 1 条、M3 附录指引补 1 条 → 用例总数由 600 增至 **605**。
+
+> ⚠️ 本轮新增的 5 条用例**未在本机执行**（沙箱 shell 不可用，见下方「执行状态」），
+> 数字由静态计数（`^def test_` 逐文件点算）得出，需宿主机跑一次 `python tests\run_tests.py` 复核。
+
+### 9.3 Q3：`tools/upload_github.ps1` 的三处修正
+
+| # | 问题 | 修正 |
+| --- | --- | --- |
+| 1 | 密钥扫描把 69 个路径拼进命令行（`git grep ... -- $tracked`），可能超出命令行长度上限，且 `git grep` 默认本就只扫受控文件 | 改为 `git grep -n -I -E $secretPattern 2>$null`，去掉 `-- $tracked` |
+| 2 | 非交互场景（CI / 计划任务 / 远程执行）下 `Read-Host` 会挂起等待输入 | 新增 `-NonInteractive` 开关；命中疑似密钥时直接 `Fail` 退出 |
+| 3 | `$localAhead` 是字符串，与 `0` / `"0"` 比较依赖 PowerShell 隐式转换，易出错 | 改为 `[int](git rev-list --count ...)` 显式转换 |
+
+同时把「未跟踪文件也要扫」这一认知写进脚本注释：`git grep` 只扫受控文件，
+因此新增文件在 `git add` **之后**才纳入扫描范围 —— 脚本的扫描步骤位于 `git add` 之前，
+故额外对未跟踪文件做一次逐文件扫描。
 
 ---
 
@@ -562,4 +646,4 @@ python tests\run_tests.py
 | breakout 48 / volume 211 笔成交 | `reports/<run>/trades.csv` |
 | I1~I6 基线、`stats.rejected` 57/24/68 | `tools/diag_lot_invariants.py` 实跑 |
 | 313/537/463、276/630、704 | `tools/diag_determinism.py` 实跑（见 §5） |
-| 通过 520 / 失败 0 | `python tests\run_tests.py` 实跑 |
+| 通过 520 / 失败 0 | `python tests\run_tests.py` 实跑（D4 修复阶段的快照；最新值见 §8.5） |

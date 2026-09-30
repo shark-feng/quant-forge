@@ -36,7 +36,7 @@
 | R2-08 | 偏差与压力测试套件 | ⏳ 待设计 |
 | R2-09 | 第二阶段设计（多因子 / 优化 / GARCH / 协整） | ⏳ 待设计 |
 
-测试：**600 个单元测试用例全部通过**（42 个测试模块）。
+测试：**605 个单元测试用例全部通过**（42 个测试模块）。
 
 ### 文档索引
 
@@ -52,6 +52,7 @@
 | [`docs/10_round2_design.md`](docs/10_round2_design.md) | 第二轮设计总纲（含 12 条缺陷修复设计） |
 | [`docs/11_akshare_provider.md`](docs/11_akshare_provider.md) | AKShare 数据源设计（字段映射 / 缓存 / 限流 / 质量） |
 | [`docs/12_framework_matrix.md`](docs/12_framework_matrix.md) | 框架选型矩阵与主引擎边界 |
+| [`docs/12_appendix_verification.md`](docs/12_appendix_verification.md) | 框架选型待核实项 V1~V6 的可执行清单（宿主机联网执行） |
 | [`docs/13_metrics.md`](docs/13_metrics.md) | M6 评价层设计（指标口径 / 容量 / 归因） |
 | [`docs/17_round3_diagnostics.md`](docs/17_round3_diagnostics.md) | 第三轮诊断报告（D1 口径 / D2 整手 / D3 字段语义 / D4 可复现性） |
 | [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) | 开发方式合同（一模块一交付、验收门禁、报告与数字纪律） |
@@ -168,7 +169,7 @@ src/aqs/
   strategy/         指标库 + 均线交叉/价格突破/成交量配合 + 配置驱动注册表
   portfolio/        仓位计算（等权/凯利）+ 目标权重组合 + 注册表
   risk/             规则引擎 + 13 条风控规则 + VaR/ES + 验收指标
-tests/              单元测试（600 个用例）
+tests/              单元测试（605 个用例）
 tools/              诊断与数据工具（口径体检 / 订单时间线 / 确定性比对 / AKShare 探测与抓取）
 LICENSE             MIT
 NOTICE              第三方署名、依赖清单、合规声明
