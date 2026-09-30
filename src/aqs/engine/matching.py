@@ -21,6 +21,7 @@ from ..core.enums import OrderType, RejectReason, Side, TradingStatus
 from ..core.exceptions import EngineError
 from ..core.logging import get_logger
 from ..core.models import Bar, CostBreakdown, MarketSnapshot, Order
+from ..core.quantity import sell_quantity
 from .cost import CostModel
 
 __all__ = ["MatchResult", "MatchingEngine", "AccountView"]
@@ -54,6 +55,12 @@ class MatchResult:
     cost: CostBreakdown = field(default_factory=CostBreakdown)
     liquidity_cap: float = math.nan
     queue_remaining: float = 0.0
+    residue_quantity: float = 0.0
+    """因不足一手而**永远无法成交**的剩余量（缺陷 #13）。
+
+    只在「部分成交后剩余 < 1 手」时非零；由 :class:`~aqs.engine.broker.Broker`
+    据此把订单判为 EXPIRED 而不是 REJECTED。
+    """
 
     @property
     def filled(self) -> bool:
@@ -221,7 +228,10 @@ class MatchingEngine:
         lot = self.lot_size
         qty = order.remaining
         if qty <= 0:
-            return MatchResult()
+            # 缺陷 #13：没有可撮合数量。旧实现返回默认 MatchResult（can_retry=True），
+            # 会让订单每个交易日 defer 一次、直到 max_defer_days 才 EXPIRED —— 形成
+            # 「僵尸订单」。这里显式声明不可重试，交由 Broker 立即结算。
+            return MatchResult(can_retry=False, status=TradingStatus.NORMAL)
 
         # ---- 持仓 / T+1 / 资金 ----
         if order.side is Side.SELL:
@@ -231,12 +241,21 @@ class MatchingEngine:
                 reason_ = RejectReason.T1_LOCK if held > 0 else RejectReason.INSUFFICIENT_POSITION
                 return self._bump(MatchResult(reason=reason_, can_retry=held > 0, status=TradingStatus.NORMAL))
             if qty > available:
-                qty = available
+                # 缺陷 #13：可卖量取整为整数股，绝不产生小数股卖单
+                qty = sell_quantity(available)
         else:
             qty = self.floor_lot(qty, lot)
             if qty < lot:
+                # 不足一手：若此前已部分成交，则剩余部分是**永远无法成交的零头**，
+                # 应记为 residue（→ EXPIRED）而不是硬拒单（→ REJECTED + 拒单率虚增）。
+                residue = order.remaining if order.filled_quantity > 0 else 0.0
                 return self._bump(
-                    MatchResult(reason=RejectReason.LOT_SIZE, can_retry=False, status=TradingStatus.NORMAL)
+                    MatchResult(
+                        reason=RejectReason.LOT_SIZE,
+                        can_retry=False,
+                        status=TradingStatus.NORMAL,
+                        residue_quantity=float(residue),
+                    )
                 )
             if account is not None:
                 affordable = self.affordable_quantity(

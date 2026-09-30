@@ -271,7 +271,15 @@ class CostBreakdown:
 # --------------------------------------------------------------------------- #
 @dataclass(slots=True)
 class Order:
-    """订单（可变对象，随生命周期更新状态）。"""
+    """订单（可变对象，随生命周期更新状态）。
+
+    字段语义（缺陷 #15 澄清）：
+    ``status`` 是**终态/当前态**，``reject_reason`` 是**最后一次「未被接受」的原因**。
+    两者可以同时有意义（例如先停牌顺延、后成交：``status=filled`` + ``reject_reason=suspended``），
+    因此不要把 ``reject_reason`` 读作「终态拒单原因」。导出时请用
+    :meth:`to_dict` 中的 ``final_status`` / ``last_reject_reason``，
+    顺延全过程见 ``deferred_reasons``。
+    """
 
     order_id: str
     symbol: str
@@ -291,6 +299,10 @@ class Order:
     avg_fill_price: float = 0.0
     deferred_days: int = 0
     reject_reason: RejectReason = RejectReason.NONE
+    deferred_reasons: list[RejectReason] = field(default_factory=list)
+    """按时间顺序记录的顺延原因（缺陷 #15）；一次 ``defer`` 追加一条。"""
+    rejected_on: _date | None = None
+    """进入终态拒单/过期/撤单的日期；未终结时为 ``None``。"""
     created_seq: int = 0
     meta: dict[str, Any] = field(default_factory=dict)
 
@@ -310,6 +322,18 @@ class Order:
     def notional(self, price: float) -> float:
         return abs(self.remaining * price)
 
+    @property
+    def rejected_before_final(self) -> bool:
+        """最终成交，但过程**曾经**被顺延/未接受过（缺陷 #15）。
+
+        为 ``True`` 时，``last_reject_reason`` 是**历史原因**，不是终态拒单原因。
+        典型轨迹：停牌顺延 → 复牌成交（``final_status=filled`` + ``last_reject_reason=suspended``）。
+        """
+        return (
+            self.status is OrderStatus.FILLED
+            and (bool(self.deferred_reasons) or self.reject_reason is not RejectReason.NONE)
+        )
+
     # ------------------------------ 状态变更 ------------------------------ #
     def apply_fill(self, quantity: float, price: float) -> None:
         """登记一笔成交并维护加权平均成交价。"""
@@ -325,28 +349,75 @@ class Order:
         else:
             self.status = OrderStatus.PARTIALLY_FILLED
 
-    def defer(self, reason: RejectReason) -> bool:
-        """登记一次顺延；返回是否仍然有效。"""
+    def defer(self, reason: RejectReason, *, day: _date | None = None) -> bool:
+        """登记一次顺延；返回是否仍然有效。
+
+        ``reason`` 同时写入 :attr:`reject_reason`（最后一次未接受原因）与
+        :attr:`deferred_reasons`（顺延原因序列）。顺延**不是**拒单。
+        """
         self.deferred_days += 1
         self.reject_reason = reason
+        if reason is not RejectReason.NONE:
+            self.deferred_reasons.append(reason)
         if self.deferred_days > self.max_defer_days:
             self.status = OrderStatus.EXPIRED
+            self.rejected_on = day
             return False
         self.status = OrderStatus.SUBMITTED
         return True
 
-    def cancel(self, reason: RejectReason = RejectReason.NONE) -> None:
+    def cancel(self, reason: RejectReason = RejectReason.NONE, *, day: _date | None = None) -> None:
         if self.is_terminal:
             return
         self.status = OrderStatus.CANCELLED
+        self.rejected_on = day
         if reason is not RejectReason.NONE:
             self.reject_reason = reason
 
-    def mark_rejected(self, reason: RejectReason, *, by_risk: bool = False) -> None:
+    def expire(self, reason: RejectReason = RejectReason.NONE, *, day: _date | None = None) -> None:
+        """标记为过期（有效期内未完全成交）。
+
+        与「拒单」的区别（见 :class:`~aqs.engine.broker.BrokerStats`）：
+
+        - ``TimeInForce.DAY``：仅在 ``submit_date`` 当日有效，当日未完成即过期；
+        - ``TimeInForce.GTC``：顺延超过 ``max_defer_days`` 后过期。
+
+        过期**不计入**拒单统计，但仍记录未成交原因。
+        """
+        if self.is_terminal:
+            return
+        self.status = OrderStatus.EXPIRED
+        self.rejected_on = day
+        if reason is not RejectReason.NONE:
+            self.reject_reason = reason
+
+    def mark_rejected(
+        self, reason: RejectReason, *, by_risk: bool = False, day: _date | None = None
+    ) -> None:
         self.reject_reason = reason
+        self.rejected_on = day
         self.status = OrderStatus.RISK_REJECTED if by_risk else OrderStatus.REJECTED
 
+    def drop(self, reason: RejectReason = RejectReason.NONE, *, day: _date | None = None) -> None:
+        """丢弃订单：**从未提交**，数量不可执行（缺陷 #13）。
+
+        典型场景：风控削减后不足一手（``RejectReason.BELOW_LOT``）。
+        与 :meth:`mark_rejected` 的区别：``dropped`` 不是风险拒单，不计入拒单率。
+        """
+        if self.is_terminal:
+            return
+        self.status = OrderStatus.DROPPED
+        self.rejected_on = day
+        if reason is not RejectReason.NONE:
+            self.reject_reason = reason
+
     def to_dict(self) -> dict[str, Any]:
+        """导出订单记录。
+
+        字段命名（缺陷 #15）：
+        ``final_status`` / ``last_reject_reason`` 为**推荐字段**，语义自解释；
+        ``status`` / ``reject_reason`` 为**过渡期别名**，取值完全相同，后续版本将移除。
+        """
         return {
             "order_id": self.order_id,
             "symbol": self.symbol,
@@ -354,14 +425,20 @@ class Order:
             "quantity": self.quantity,
             "order_type": self.order_type.value,
             "limit_price": self.limit_price,
-            "status": self.status.value,
+            "final_status": self.status.value,
             "filled_quantity": self.filled_quantity,
             "avg_fill_price": self.avg_fill_price,
             "signal_date": str(self.signal_date) if self.signal_date else None,
             "submit_date": str(self.submit_date) if self.submit_date else None,
             "deferred_days": self.deferred_days,
-            "reject_reason": self.reject_reason.value,
+            "last_reject_reason": self.reject_reason.value,
+            "deferred_reasons": "|".join(r.value for r in self.deferred_reasons),
+            "rejected_on": str(self.rejected_on) if self.rejected_on else None,
+            "rejected_before_final": self.rejected_before_final,
             "tag": self.tag,
+            # ---- 过渡期别名（deprecated；取值与上面两个字段相同）----
+            "status": self.status.value,
+            "reject_reason": self.reject_reason.value,
         }
 
 

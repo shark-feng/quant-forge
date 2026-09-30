@@ -3,12 +3,32 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "aqs"
+name = "quant-forge"
 version = "0.1.0"
-description = "A-share quantitative research system (research & education only)"
+description = "A-share quantitative research system: PIT data layer, event-driven backtest engine, portfolio & risk layers, metrics and reporting (research & education only)"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "Proprietary-Research" }
+license = { text = "MIT" }
+authors = [{ name = "shark-feng", email = "434387081@qq.com" }]
+keywords = ["quantitative-finance", "backtest", "a-share", "china-stock-market", "research"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+
+# 主包依赖只有一个分组：**核心运行依赖**。
+# 第三方回测框架（AKQuant / PyBroker / Backtrader）**禁止**出现在这里，
+# 也禁止放进任何 extras —— 边界纪律见 docs/DEVELOPMENT.md §7 与 docs/12_framework_matrix.md。
 dependencies = [
     "numpy>=1.24",
     "pandas>=2.0",
@@ -16,9 +36,39 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-science = ["scipy>=1.10", "statsmodels>=0.14", "cvxpy>=1.4"]
-io = ["pyarrow>=14.0"]
-dev = ["pytest>=7.4"]
+# 第二阶段：多因子 / 优化 / GARCH / 协整
+science = [
+    "scipy>=1.10",
+    "statsmodels>=0.14",
+    "cvxpy>=1.4",
+]
+# 数据源适配（M5）：AKShare 抓取 + Parquet 缓存加速
+data = [
+    "akshare>=1.12",
+    "pyarrow>=14.0",
+]
+# 开发与测试（注意：测试**不依赖** pytest，tests/run_tests.py 为等价零依赖运行器）
+dev = [
+    "pytest>=7.4",
+]
+# 一次性装齐
+all = [
+    "scipy>=1.10",
+    "statsmodels>=0.14",
+    "cvxpy>=1.4",
+    "akshare>=1.12",
+    "pyarrow>=14.0",
+    "pytest>=7.4",
+]
+
+[project.urls]
+Homepage = "https://github.com/shark-feng/quant-forge"
+Repository = "https://github.com/shark-feng/quant-forge"
+Issues = "https://github.com/shark-feng/quant-forge/issues"
+Changelog = "https://github.com/shark-feng/quant-forge/blob/main/CHANGELOG.md"
+
+[tool.setuptools]
+license-files = ["LICENSE", "NOTICE"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

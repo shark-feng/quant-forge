@@ -25,8 +25,15 @@ ENV/
 .coverage.*
 htmlcov/
 .tmp_tests/
+.tmp_diag/
+.tmp_*/
+.tmp/
 .tox/
 .nox/
+
+# ---- 日志 ----
+*.log
+logs/
 
 # ---- IDE ----
 .idea/
@@ -40,14 +47,31 @@ data/raw/*
 data/processed/*
 data/index/*
 data/fundamental/*
+data/cache/
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !data/index/.gitkeep
 !data/fundamental/.gitkeep
 
+# 列式缓存（体积大、可由原始数据重建）
+*.parquet
+*.feather
+*.h5
+*.hdf5
+
 # ---- 回测输出（体积大，可复现）----
 reports/*
 !reports/.gitkeep
+# 第三方框架交叉验证输出（Backtrader / PyBroker，见 docs/12_framework_matrix.md）
+reports/bench/
+
+# ---- 密钥与本地凭据（绝不入库）----
+.env
+.env.*
+*.pem
+*.key
+secrets.*
+credentials.*
 
 # ---- 审计日志 ----
 *.jsonl

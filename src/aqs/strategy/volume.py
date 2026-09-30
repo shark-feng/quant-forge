@@ -34,6 +34,7 @@ class VolumeStrategy(BaseStrategy):
         "volume_window",
         "volume_ratio",
         "volume_ma_exclude_today",
+        "volume_min_base",
         "price_field",
         "include_exits",
     )
@@ -43,6 +44,8 @@ class VolumeStrategy(BaseStrategy):
         self.volume_window = self._int("volume_window", 20, minimum=2)
         self.volume_ratio = self._float("volume_ratio", 1.5, minimum=0.0)
         self.exclude_today = self._bool("volume_ma_exclude_today", True)
+        # 缺陷修复 #9：均量基准过低（长期停牌/新股）时量比会爆炸 → 低于阈值视为无信号
+        self.volume_min_base = self._float("volume_min_base", 10_000.0, minimum=0.0)
         self.price_field = self._str("price_field", "close_adj", choices=_PRICE_FIELDS)
         self.include_exits = self._bool("include_exits", True)
 
@@ -75,6 +78,9 @@ class VolumeStrategy(BaseStrategy):
             vol, base = volume_now.get(symbol), vol_base.get(symbol)
             c_now, c_prev = close_now.get(symbol), close_prev.get(symbol)
             if not all(is_finite(v) for v in (vol, base, c_now, c_prev)) or not base or base <= 0:
+                continue
+            if base < self.volume_min_base:
+                # 均量基准过低（长期停牌/新股）：量比不可信，直接放弃该标的（缺陷修复 #9）
                 continue
             ratio = vol / base
             if ratio <= self.volume_ratio:

@@ -116,6 +116,31 @@
 
 **引擎在 `submit_order` 中断言**：`t_plus_one=True` 时 `submit_date > signal_date`，否则抛 `FutureFunctionError`。
 
+### 5.1 订单字段语义（缺陷 #15 澄清，`orders.csv` 必读）
+
+`Order` 的状态字段**不是**同一维度上的取值，混读会产生误判。权威定义如下：
+
+| 字段（`to_dict`） | 语义 | 备注 |
+| --- | --- | --- |
+| `final_status` | 终态/当前态：`created` / `submitted` / `partially_filled` / `filled` / `expired` / `rejected` / `risk_rejected` / `cancelled` | **推荐字段** |
+| `last_reject_reason` | **最后一次「未被接受」的原因**：可能是顺延原因（停牌/涨停/无报价）、风控拒单原因或硬约束原因 | **不一定是拒单原因** |
+| `deferred_reasons` | 按时间顺序的顺延原因序列，`\|` 分隔（如 `suspended\|limit_up`） | 完整可追溯 |
+| `deferred_days` | 顺延次数（交易日） | 与 `deferred_reasons` 长度一致 |
+| `rejected_on` | 进入终态「拒单/过期/撤单」的日期；正常成交时为 `null` | 日期口径 |
+| `rejected_before_final` | `true` 表示**最终成交，但过程曾被顺延/未接受**：此时 `last_reject_reason` 只是历史 | 见下方样例 |
+| `status` / `reject_reason` | **过渡期别名**，取值与 `final_status` / `last_reject_reason` 完全相同 | deprecated，后续版本移除 |
+
+两个易误读的样例及其正确读法：
+
+| `orders.csv` 记录 | ❌ 错误读法 | ✅ 正确读法 |
+| --- | --- | --- |
+| `final_status=filled`, `last_reject_reason=suspended`, `deferred_reasons=suspended`, `rejected_before_final=true` | 「订单被拒单了，因为停牌」 | 「订单因停牌顺延 1 个交易日后**成交**；suspended 是历史原因」 |
+| `final_status=expired`, `last_reject_reason=none`, `rejected_on=2022-06-15` | 「订单过期但没有原因」 | 「订单在有效期（GTC `max_defer_days` 或 DAY 当日）内未成交而**过期**；**过期不计入拒单统计**」 |
+
+> 统计口径提醒：**拒单率只看 `final_status ∈ {rejected, risk_rejected}`**；
+> `expired`（含「部分成交后剩余不足一手」）与 `cancelled` 都不计入拒单。
+> 详见 `docs/06_risk_rms.md` §4。
+
 ---
 
 ## 6. 事件优先级：类型优先级 vs 日内步骤优先级

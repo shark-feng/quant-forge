@@ -13,10 +13,15 @@ from typing import Any, Iterable, Mapping, Sequence
 import yaml
 
 from ..core.exceptions import ConfigError
+from ..core.logging import get_logger
 from .schema import BaseConfig, RiskConfig, _deep_merge, construct
 
 __all__ = [
+    "ENV_PROJECT_ROOT",
     "PROJECT_ROOT",
+    "discover_project_root",
+    "resolve_project_root",
+    "clear_project_root_cache",
     "resolve_path",
     "load_yaml",
     "parse_override",
@@ -28,8 +33,84 @@ __all__ = [
     "load_cost_scenario",
 ]
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-"""仓库根目录（src/aqs/config/loader.py → 上溯 3 层）。"""
+logger = get_logger("config.loader")
+
+ENV_PROJECT_ROOT = "AQS_PROJECT_ROOT"
+"""环境变量：显式指定项目根目录（优先级最高）。"""
+
+_ROOT_MARKERS = ("pyproject.toml", ".git", "setup.cfg")
+_MAX_LEVELS = 6
+_root_cache: dict[str, Path] = {}
+
+
+def discover_project_root(start: Path, *, max_levels: int = _MAX_LEVELS) -> Path | None:
+    """自 ``start`` 向上查找包含 ``pyproject.toml`` / ``.git`` / ``setup.cfg`` 的目录。
+
+    找到返回该目录；``max_levels`` 层内未找到返回 ``None``。
+    """
+    current = Path(start).resolve()
+    if current.is_file():
+        current = current.parent
+    for _ in range(max_levels + 1):
+        for marker in _ROOT_MARKERS:
+            if (current / marker).exists():
+                return current
+        if current.parent == current:
+            break
+        current = current.parent
+    return None
+
+
+def resolve_project_root(
+    *,
+    start: Path | None = None,
+    env: Mapping[str, str] | None = None,
+    use_cache: bool = True,
+) -> Path:
+    """解析项目根目录（缺陷修复 #5）。
+
+    优先级：
+      1. 环境变量 ``AQS_PROJECT_ROOT``（目录不存在时告警并继续下一策略）；
+      2. 自包目录向上查找 ``pyproject.toml`` / ``.git`` / ``setup.cfg``；
+      3. 兜底：``src/aqs/config/loader.py`` 的 ``parents[3]``（保持历史行为）。
+    """
+    source = os.environ if env is None else env
+    cache_key = f"{start}|{source.get(ENV_PROJECT_ROOT, '')}"
+    if use_cache and cache_key in _root_cache:
+        return _root_cache[cache_key]
+
+    resolved: Path | None = None
+    raw = source.get(ENV_PROJECT_ROOT)
+    if raw:
+        candidate = Path(raw).expanduser()
+        if candidate.is_dir():
+            if not (candidate / "pyproject.toml").exists():
+                logger.warning(
+                    "%s=%s 下没有 pyproject.toml，仍按环境变量处理（请确认这是项目根目录）",
+                    ENV_PROJECT_ROOT,
+                    candidate,
+                )
+            resolved = candidate.resolve()
+        else:
+            logger.warning("%s=%s 不是有效目录，忽略该环境变量", ENV_PROJECT_ROOT, raw)
+
+    if resolved is None:
+        resolved = discover_project_root(start or Path(__file__).resolve().parent)
+    if resolved is None:
+        resolved = Path(__file__).resolve().parents[3]
+
+    if use_cache:
+        _root_cache[cache_key] = resolved
+    return resolved
+
+
+def clear_project_root_cache() -> None:
+    """清空项目根目录解析缓存（测试用）。"""
+    _root_cache.clear()
+
+
+PROJECT_ROOT: Path = resolve_project_root()
+"""仓库根目录（等价于 ``resolve_project_root()``，进程启动时解析一次）。"""
 
 
 def resolve_path(path: str | Path | None, *, root: Path | None = None) -> Path | None:

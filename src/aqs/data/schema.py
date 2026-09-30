@@ -252,13 +252,21 @@ def normalize_bars(
     for col in ("list_date", "delist_date"):
         out[col] = grouped[col].transform(lambda s: s.ffill().bfill())
 
-    # 4) 板块
-    if "board" not in out.columns or out["board"].isna().any():
-        board_map = {sym: infer_board(sym).value for sym in out["symbol"].unique()}
-        out["board"] = out["symbol"].map(board_map)
+    # 4) 板块：**优先使用数据源提供的值**，仅对缺失/非法行按代码前缀推断（缺陷修复 #2）
+    inferred = out["symbol"].map({sym: infer_board(sym).value for sym in out["symbol"].unique()})
+    if "board" in out.columns:
+        provided = out["board"].astype(str).str.strip().str.lower()
+        valid_values = {b.value for b in Board}
+        invalid = ~provided.isin(valid_values)  # 含原值为 NaN（转成 "nan"）的行
+        out["board"] = provided.where(~invalid).fillna(inferred)
+        if bool(invalid.any()):
+            logger.warning(
+                "board 列有 %d 行缺失或非法（合法值：%s），已按证券代码前缀推断",
+                int(invalid.sum()),
+                sorted(valid_values),
+            )
     else:
-        out["board"] = out["board"].astype(str)
-    out["board"] = out["board"].fillna(out["symbol"].map({s: infer_board(s).value for s in out["symbol"].unique()}))
+        out["board"] = inferred
 
     # 5) bar_seq：该标的第几根 K 线（上市天数的兜底来源）
     out["bar_seq"] = grouped.cumcount() + 1
@@ -440,6 +448,13 @@ def validate_bars(
                     f"存在 {out_of_band} 条收盘价越出涨跌停区间的记录（可能是复权/ST规则/新股差异，需人工核查）"
                 )
 
+    # 板块取值合法性（缺陷修复 #2：数据源提供 board 时必须合法，非法值在归一化时被推断覆盖）
+    if "board" in df.columns:
+        valid_boards = {b.value for b in Board}
+        bad_board = int((~df["board"].astype(str).isin(valid_boards)).sum())
+        if bad_board:
+            report.add_error(f"board 列存在 {bad_board} 个非法取值；合法值：{sorted(valid_boards)}")
+
     # 日期与上市/退市一致性
     if {"list_date", "delist_date"}.issubset(df.columns):
         ld = pd.to_datetime(df["list_date"], errors="coerce")
@@ -451,6 +466,17 @@ def validate_bars(
         after_delist = int((dd.notna() & (dts > dd)).sum())
         if after_delist:
             report.add_error(f"存在 {after_delist} 条晚于退市日期的记录")
+
+    # 上市日覆盖率（缺陷修复 #8：缺失上市日会导致股票池「上市不足 N 日」过滤失效）
+    if "list_date" in df.columns and "symbol" in df.columns:
+        missing_symbols = sorted(df.loc[df["list_date"].isna(), "symbol"].unique().tolist())
+        report.stats["missing_list_date_symbols"] = len(missing_symbols)
+        report.stats["missing_list_date_sample"] = missing_symbols[:20]
+        if missing_symbols:
+            report.add_warning(
+                f"{len(missing_symbols)} 个标的缺少 list_date（示例：{missing_symbols[:5]}）；"
+                "上市交易日数将退化为代理口径，详见 data.listing_date.policy 与 data/store.py"
+            )
 
     # 停牌软告警
     if {"is_suspended", "volume"}.issubset(df.columns):

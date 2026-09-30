@@ -144,14 +144,24 @@ def volume_ratio(
     window: int,
     *,
     exclude_current: bool = True,
+    min_base: float = 0.0,
 ) -> pd.DataFrame:
     """量比 = 当日成交量 / 过去 window 日均量。
 
     ``exclude_current=True``（默认）：基准**不含当日**，与合同「过去 20 日平均成交量」一致。
+
+    ``min_base``（缺陷修复 #9）：基准低于该阈值时返回 ``NaN``（视为无信号）。
+    用于挡住「长期停牌后复牌」「新股上市初期」等场景 —— 这类标的均量可能只有几百股，
+    量比会被放大几十倍而产生假信号。默认 ``0.0`` 表示不设阈值（保持纯函数无额外假设），
+    策略层通过 ``volume_min_base`` 传入配置值。
     """
     _check_window(window)
+    if min_base < 0:
+        raise ValueError(f"min_base 不能为负，收到 {min_base}")
     df = _as_frame(volume).astype("float64")
     base = df.shift(1).rolling(window, min_periods=window).mean() if exclude_current else sma(df, window)
+    if min_base > 0:
+        base = base.where(base >= min_base)
     return df / base.replace(0.0, np.nan)
 
 

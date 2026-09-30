@@ -23,7 +23,7 @@ from ..config.schema import DataConfig, PriceLimitConfig, UniverseConfig, as_con
 from ..core.calendar import TradingCalendar
 from ..core.dates import DateLike, to_date, to_timestamp
 from ..core.enums import Board
-from ..core.exceptions import DataError, LookaheadError
+from ..core.exceptions import DataError, DataQualityError, LookaheadError
 from ..core.logging import get_logger
 from ..core.models import Bar, SymbolMeta
 from .schema import (
@@ -107,6 +107,37 @@ class DataStore:
             elif not self.quality.ok:
                 logger.warning("数据存在错误但 strict=False，继续运行：\n%s", self.quality.summary())
 
+        # ---- 上市日簿记（缺陷修复 #8：必须在上市日策略检查之前初始化） ----
+        self._listed_days: dict[str, dict[_date, int]] = {}
+        self._listed_days_source: dict[str, str] = {}
+        self._proxy_symbols: set[str] = set()
+        self._window_symbols: set[str] = set()
+        self._proxy_warned: set[str] = set()
+
+        # ---- 上市日策略（缺陷修复 #8：不允许静默用 bar_seq 兜底） ----
+        missing_list_date = self._missing_list_date_symbols()
+        if self.config.listing_date.policy == "strict":
+            if missing_list_date:
+                preview = missing_list_date[:10]
+                raise DataQualityError(
+                    f"{len(missing_list_date)} 个标的缺少 list_date（示例：{preview}）；"
+                    "上市交易日数是股票池「上市不足 N 日」过滤的依据，缺失会导致过滤失效。"
+                    "请在数据源中提供真实上市日，或设置 data.listing_date.policy=proxy 显式接受代理口径",
+                    report=self.quality,
+                )
+        elif missing_list_date:
+            # proxy：构造时即登记代理标的，使 describe()/诊断无需等到首次查询就能披露
+            self._proxy_symbols.update(missing_list_date)
+            for symbol in missing_list_date:
+                self._listed_days_source[symbol] = "bar_seq_proxy"
+            if self.quality is not None:
+                self.quality.stats["listed_days_proxy_symbols"] = len(self._proxy_symbols)
+                self.quality.stats["listed_days_proxy_sample"] = sorted(self._proxy_symbols)[:20]
+                self.quality.add_warning(
+                    f"{len(self._proxy_symbols)} 个标的缺少 list_date，"
+                    "上市交易日数退化为 bar_seq 代理口径（listing_date.policy=proxy）"
+                )
+
         # ---- 日历 ----
         self.calendar = calendar or TradingCalendar.from_bars(self._df, name=f"{name}_calendar")
         self.calendar.bind_tradable(self.is_tradable)
@@ -124,7 +155,6 @@ class DataStore:
             str(sym): grp.set_index("date", drop=False) for sym, grp in self._df.groupby("symbol", sort=False, observed=True)
         }
         self._cache: OrderedDict[_date, dict[str, Bar]] = OrderedDict()
-        self._listed_days: dict[str, dict[_date, int]] = {}
         self._rolling_cache: dict[tuple[str, str, int], pd.Series] = {}
 
         # ---- 元信息 ----
@@ -145,6 +175,13 @@ class DataStore:
     # ------------------------------------------------------------------ #
     # 元信息
     # ------------------------------------------------------------------ #
+    def _missing_list_date_symbols(self) -> list[str]:
+        """缺少 ``list_date`` 的标的（按名称排序）。"""
+        if "list_date" not in self._df.columns:
+            return sorted(self._df["symbol"].astype(str).unique().tolist())
+        frame = self._df.groupby("symbol", observed=True)["list_date"].first()
+        return sorted(frame[frame.isna()].index.astype(str).tolist())
+
     def _build_symbol_meta(self) -> dict[str, SymbolMeta]:
         meta: dict[str, SymbolMeta] = {}
         industry = self._df["industry"] if "industry" in self._df.columns else None
@@ -257,8 +294,21 @@ class DataStore:
             board=board,
         )
 
-    def _listed_days_for(self, symbols: Sequence[str], day: _date) -> dict[str, int]:
-        """按标的惰性计算「上市以来第几个交易日」序列并缓存。"""
+    def _listed_days_for(
+        self,
+        symbols: Sequence[str],
+        day: _date,
+        *,
+        policy: str | None = None,
+    ) -> dict[str, int]:
+        """按标的惰性计算「上市以来第几个交易日」并缓存（缺陷修复 #8）。
+
+        - 有 ``list_date`` → 按交易日历精确计算，来源标记为 ``list_date``；
+        - 无 ``list_date`` 且 ``policy="strict"`` → 抛 :class:`DataQualityError`（不静默兜底）；
+        - 无 ``list_date`` 且 ``policy="proxy"`` → 用 ``bar_seq`` 代理，来源标记为
+          ``bar_seq_proxy``，并记入质量报告与诊断（**显式降级，而非静默**）。
+        """
+        pol = policy or self.config.listing_date.policy
         need = [s for s in dict.fromkeys(symbols) if s not in self._listed_days]
         for sym in need:
             grp = self._per_symbol.get(sym)
@@ -267,23 +317,85 @@ class DataStore:
             mapping: dict[_date, int] = {}
             seq = grp["bar_seq"].to_numpy() if "bar_seq" in grp.columns else np.arange(1, len(grp) + 1)
             list_date = grp["list_date"].iloc[0] if "list_date" in grp.columns else None
+            has_list_date = list_date is not None and not pd.isna(list_date)
+            if not has_list_date and pol == "strict":
+                raise DataQualityError(
+                    f"标的 {sym} 缺少 list_date，无法计算上市交易日数；请在数据源提供真实上市日，"
+                    "或设置 data.listing_date.policy=proxy 显式接受代理口径",
+                    report=self.quality,
+                )
+            if not has_list_date:
+                self._proxy_symbols.add(sym)
+                self._listed_days_source[sym] = "bar_seq_proxy"
+                if self.config.listing_date.proxy_warn_once and sym not in self._proxy_warned:
+                    self._proxy_warned.add(sym)
+                    logger.warning(
+                        "标的 %s 缺少 list_date，上市交易日数退化为 bar_seq 代理口径"
+                        "（listing_date.policy=proxy）",
+                        sym,
+                    )
             li: int | None = None
-            if list_date is not None and not pd.isna(list_date):
+            if has_list_date:
                 li = self._calendar_index.get(pd.Timestamp(list_date).date())
+                if li is not None:
+                    self._listed_days_source[sym] = "list_date"
+                else:
+                    # list_date 早于数据起点：日历内无法精确计数，按工作日近似并显式标记
+                    self._listed_days_source[sym] = "list_date_window"
+                    self._window_symbols.add(sym)
             for i, ts in enumerate(grp.index):
                 d = pd.Timestamp(ts).date()
                 di = self._calendar_index.get(d)
                 if li is not None and di is not None:
                     mapping[d] = di - li + 1
+                elif has_list_date:
+                    # 工作日近似（不含节假日修正）：只会高估，不会把老股误判为新股
+                    mapping[d] = int(
+                        np.busday_count(
+                            np.datetime64(pd.Timestamp(list_date).date()), np.datetime64(d)
+                        )
+                    ) + 1
                 else:
                     mapping[d] = int(seq[i])
             self._listed_days[sym] = mapping
+        if self._proxy_symbols:
+            self.quality.stats["listed_days_proxy_symbols"] = len(self._proxy_symbols)
+            self.quality.stats["listed_days_proxy_sample"] = sorted(self._proxy_symbols)[:20]
+        if self._window_symbols:
+            self.quality.stats["listed_days_window_symbols"] = len(self._window_symbols)
         return {s: self._listed_days.get(s, {}).get(day, 0) for s in dict.fromkeys(symbols)}
 
-    def listed_days(self, symbol: str, day: DateLike) -> int:
+    def listed_days_source(self, symbol: str) -> str:
+        """上市交易日数的来源（缺陷修复 #8）。
+
+        - ``list_date``：list_date 落在数据日历内，**精确**按交易日计数；
+        - ``list_date_window``：list_date 早于数据起点，按工作日**近似**（只高估不低估）；
+        - ``bar_seq_proxy``：**缺 list_date**，用 K 线序号代理（仅 policy=proxy 时允许）；
+        - ``unknown``：无法判定。
+        """
+        if symbol not in self._listed_days_source:
+            first = self.calendar.first_day
+            if first is not None:
+                try:
+                    self._listed_days_for([symbol], first)
+                except DataQualityError:
+                    return "unknown"
+        return self._listed_days_source.get(symbol, "unknown")
+
+    @property
+    def proxy_listed_symbols(self) -> list[str]:
+        """使用 ``bar_seq`` 代理上市日口径的标的（供诊断与报告披露）。"""
+        return sorted(self._proxy_symbols)
+
+    @property
+    def window_listed_symbols(self) -> list[str]:
+        """list_date 早于数据起点、按工作日近似的标的。"""
+        return sorted(self._window_symbols)
+
+    def listed_days(self, symbol: str, day: DateLike, *, policy: str | None = None) -> int:
         """标的截至某日的上市交易日数。"""
         d = to_date(day)
-        return self._listed_days_for([symbol], d).get(symbol, 0)
+        return self._listed_days_for([symbol], d, policy=policy).get(symbol, 0)
 
     def bar(self, symbol: str, day: DateLike, *, as_of: DateLike | None = None) -> Bar | None:
         self._guard(as_of, day, f"bar({symbol})")
@@ -545,6 +657,9 @@ class DataStore:
             "end": str(self.calendar.last_day),
             "has_index_history": self.has_index_history,
             "has_fundamentals": self._fundamentals is not None,
+            "listing_date_policy": self.config.listing_date.policy,
+            "listed_days_proxy_symbols": len(self._proxy_symbols),
+            "listed_days_window_symbols": len(self._window_symbols),
             "quality_errors": len(self.quality.errors) if self.quality else 0,
             "quality_warnings": len(self.quality.warnings) if self.quality else 0,
         }

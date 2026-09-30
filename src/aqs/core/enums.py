@@ -63,6 +63,12 @@ class OrderStatus(str, Enum):
     CANCELLED = "cancelled"
     EXPIRED = "expired"
     REJECTED = "rejected"
+    DROPPED = "dropped"
+    """风控削减后数量不可执行（不足一手），**从未提交**即被丢弃（缺陷 #13）。
+
+    与 ``risk_rejected`` 的区别：这不是风险拒单，而是「限额与整手约束冲突」产生的
+    不可执行数量；因此不计入拒单统计，也不计入误杀率评估。
+    """
 
     @property
     def is_terminal(self) -> bool:
@@ -81,6 +87,7 @@ _TERMINAL_STATUSES = frozenset(
         OrderStatus.EXPIRED,
         OrderStatus.REJECTED,
         OrderStatus.RISK_REJECTED,
+        OrderStatus.DROPPED,
     }
 )
 
@@ -159,6 +166,8 @@ class RejectReason(str, Enum):
     DELISTED = "delisted"                      # 已退市（拒绝）
     T1_LOCK = "t1_lock"                        # T+1 限制
     LOT_SIZE = "lot_size"                      # 不足 100 股整数倍
+    BELOW_LOT = "below_lot"                    # 风控削减后不足一手，不可执行（缺陷 #13）
+    LOT_SIZE_RESIDUE = "lot_size_residue"      # 部分成交后剩余不足一手（缺陷 #13）
     INSUFFICIENT_CASH = "insufficient_cash"
     INSUFFICIENT_POSITION = "insufficient_position"
     INSUFFICIENT_LIQUIDITY = "insufficient_liquidity"  # 参与率上限导致当日无可行成交量

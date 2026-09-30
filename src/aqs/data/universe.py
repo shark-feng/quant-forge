@@ -46,6 +46,8 @@ class UniverseStats:
     after_liquidity: int = 0
     final: int = 0
     excluded: dict[str, list[str]] = field(default_factory=dict)
+    proxy_symbols: list[str] = field(default_factory=list)
+    """使用代理上市日口径（缺 list_date）的候选标的 —— 缺陷修复 #8：显式披露，不静默。"""
 
     @property
     def dropped(self) -> int:
@@ -62,6 +64,7 @@ class UniverseStats:
             "after_liquidity": self.after_liquidity,
             "final": self.final,
             "dropped": self.dropped,
+            "proxy_listed_symbols": len(self.proxy_symbols),
             "excluded_counts": {k: len(v) for k, v in self.excluded.items()},
         }
 
@@ -240,6 +243,11 @@ class UniverseBuilder:
         stats.after_liquidity = len(final)
         stats.final = len(final)
         stats.excluded = excluded
+        # 显式披露「上市日缺失 → 代理口径」的标的（缺陷修复 #8）
+        checked = after_listing + excluded["listing"]
+        proxy = [s for s in checked if self.store.listed_days_source(s) == "bar_seq_proxy"]
+        if proxy:
+            stats.proxy_symbols = sorted(proxy)
         return sorted(final), stats
 
     # ------------------------------------------------------------------ #

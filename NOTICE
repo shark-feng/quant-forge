@@ -1,0 +1,113 @@
+# NOTICE
+
+本项目 **quant-forge / aqs**（A 股量化研究系统）
+
+版权所有 (c) 2026 shark-feng，依 [MIT License](LICENSE) 发布。
+
+---
+
+## 1. 数据来源署名
+
+### 1.1 AKShare
+
+本项目的可选数据适配层（`src/aqs/data/akshare_provider.py`，第三轮 M5 交付）
+通过 [AKShare](https://github.com/akfamily/akshare) 获取公开市场数据。
+
+- AKShare 由 **akfamily** 维护，许可证：**MIT**（见 `docs/12_framework_matrix.md` §5；
+  许可证原文与版本号属**待联网核实项**，见下文 §4）；
+- 本项目**仅以依赖方式调用** AKShare 的公开接口，**未复制其源码**，
+  也未将其数据结构直接照搬进本项目的 `DataStore`（字段映射集中在 `MAPPERS`，
+  由本项目按数学模型需求反推数据规格，见 `docs/11_akshare_provider.md`）；
+- AKShare 抓取的原始行情/财务数据，其**版权归原始数据提供方**
+  （上海证券交易所、深圳证券交易所、北京证券交易所、巨潮资讯、
+  中证指数有限公司、各行情源等）所有。本项目仅将其用于研究与教育目的，
+  **不再分发**原始数据（`data/` 与 `reports/` 均在 `.gitignore` 中排除）。
+
+### 1.2 其他数据源
+
+若后续接入其他数据源，须在本文件补充署名与本项目未分发原始数据的声明。
+
+---
+
+## 2. 第三方依赖清单
+
+许可证信息按「依赖自身声明的许可证」记录；带 *待核实* 标记的条目因本机无外网，
+尚未逐条核对许可证原文（流程见 §4）。
+
+### 2.1 核心运行依赖（`core`）
+
+| 依赖 | 版本要求 | 用途 | 许可证 |
+| --- | --- | --- | --- |
+| numpy | >=1.24 | 数值计算 | BSD-3-Clause |
+| pandas | >=2.0 | 表格与时间序列 | BSD-3-Clause |
+| PyYAML | >=6.0 | 配置文件解析 | MIT |
+
+### 2.2 科学计算依赖（`science`，第二阶段）
+
+| 依赖 | 版本要求 | 用途 | 许可证 |
+| --- | --- | --- | --- |
+| scipy | >=1.10 | 优化、统计分布 | BSD-3-Clause |
+| statsmodels | >=0.14 | 回归、时间序列（GARCH/协整） | BSD-3-Clause |
+| cvxpy | >=1.4 | 组合优化（均值-方差 + 约束） | Apache-2.0 |
+
+### 2.3 数据访问依赖（`data`，可选）
+
+| 依赖 | 版本要求 | 用途 | 许可证 |
+| --- | --- | --- | --- |
+| akshare | >=1.12 | A 股公开数据抓取 | MIT |
+| pyarrow | >=14.0 | Parquet 缓存加速（可选） | Apache-2.0 |
+
+### 2.4 开发与测试依赖（`dev`）
+
+| 依赖 | 版本要求 | 用途 | 许可证 |
+| --- | --- | --- | --- |
+| pytest | >=7.4 | 测试运行器（**本项目不依赖它**：`tests/run_tests.py` 为等价零依赖运行器） | MIT |
+
+---
+
+## 3. 合规声明
+
+1. **用途限定**：本项目仅供**量化研究与教育**使用，**不构成任何投资建议**。
+   任何据此进行的实盘交易，风险与后果由使用者自行承担。
+2. **不接实盘**：第三阶段（Tick/订单簿回放、Almgren-Chriss、TWAP/VWAP/POV）
+   全部为**离线模拟**，**明确禁止**接入任何真实交易接口（见 `docs/DEVELOPMENT.md` §3）。
+3. **无 GPL 传染**：`src/aqs` 主包**不包含任何 GPL 系代码**。
+   Backtrader（GPL 系）仅作为**独立 venv 的离线交叉验证工具**，不进入主包依赖、
+   不随主包分发、不与主包链接（见 `docs/12_framework_matrix.md` §5）。
+4. **未捆绑第三方回测框架**：主引擎为自研 `aqs.engine`；
+   第三方框架**禁止**写入主包 `dependencies`。
+5. **不分发原始数据**：仓库不含任何来自数据源的原始行情/财务数据。
+   仓库内 `reports/` 下的演示结果由**确定性合成数据**生成
+   （`src/aqs/data/synthetic.py`），不含真实市场数据。
+6. **密钥与凭据**：仓库不含任何 API Key、Token、账号口令。
+   提交前扫描流程见 §4。
+
+---
+
+## 4. 待核实项（联网环境执行）
+
+本机开发环境无外网，以下事实尚未核对原文，**列为 TODO**，不得当作已确认结论引用：
+
+| 编号 | 待核实内容 | 核实方法 | 记录位置 |
+| --- | --- | --- | --- |
+| N1 | AKShare 许可证原文与当前版本号 | 拉取仓库 `LICENSE` 与 `pyproject.toml` | 本节 |
+| N2 | scipy / statsmodels / cvxpy / pyarrow / pytest 许可证原文 | 各仓库 `LICENSE` | §2 |
+| N3 | Backtrader 许可证原文（GPL 版本：v2 还是 v3） | 仓库 `LICENSE` | `docs/12_framework_matrix.md` §5 |
+| N4 | PyBroker / AKQuant 许可证原文与版本 | 仓库 `LICENSE` | `docs/12_framework_matrix.md` §5 |
+| N5 | 依赖许可证汇总清单 | 联网环境执行 `pip-licenses --format=markdown` | §2 表格 |
+
+核实后请更新本文件与 `docs/12_framework_matrix.md`，并在 `CHANGELOG.md` 记录。
+
+---
+
+## 5. 提交前密钥扫描
+
+```powershell
+# 扫描工作区（含未跟踪文件）
+git grep -n -I -E "(api[_-]?key|secret|token|password|passwd|private[_-]?key|BEGIN [A-Z ]*PRIVATE KEY)" -- . ":(exclude)docs/17_round3_diagnostics.md"
+# 查看将被提交的内容中是否含敏感串
+git diff --cached -U0 | Select-String -Pattern "api[_-]?key|secret|token|password"
+```
+
+发现密钥时的处置：**先撤销/轮换密钥**，再改写历史（`git filter-repo`）——
+仅删除文件不足以消除已泄露的凭据。

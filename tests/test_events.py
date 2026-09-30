@@ -7,7 +7,7 @@ import pandas as pd
 from tests.compat import approx, raises
 from tests.tools import DEFAULT_START, make_bar, make_order, make_snapshot
 
-from aqs.core.enums import EventType, SessionPhase
+from aqs.core.enums import EventType, SessionPhase, Side
 from aqs.core.events import (
     EventLoop,
     EventQueue,
@@ -38,8 +38,17 @@ def _bar_events():
 def test_queue_orders_by_priority_for_same_timestamp():
     q = EventQueue()
     snapshot = _bar_events()
+    fill = Fill(
+        fill_id="F1",
+        order_id="O1",
+        symbol="600000.SH",
+        side=Side.BUY,
+        quantity=100,
+        price=10.0,
+        trade_date=DAY.date(),
+    )
     # 故意逆序入队
-    q.push(FillEvent(timestamp=TS, fill=Fill("F1", "O1", "600000.SH", side=__side_buy(), quantity=100, price=10.0, trade_date=DAY.date())))
+    q.push(FillEvent(timestamp=TS, fill=fill))
     q.push(OrderEvent(timestamp=TS, order=make_order()))
     q.push(RiskCheckEvent(timestamp=TS, order=make_order()))
     q.push(SignalEvent(timestamp=TS, signals=()))
@@ -54,12 +63,6 @@ def test_queue_orders_by_priority_for_same_timestamp():
         EventType.ORDER,
         EventType.FILL,
     ]
-
-
-def __side_buy():
-    from aqs.core.enums import Side
-
-    return Side.BUY
 
 
 def test_queue_orders_by_timestamp_first():

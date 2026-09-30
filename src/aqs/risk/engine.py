@@ -15,53 +15,18 @@ return REDUCE(qty) if qty < order.remaining else ALLOW
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Sequence
 
 from ..config.schema import RiskConfig
 from ..core.dates import DateLike
-from ..core.enums import RiskAction, Side
+from ..core.enums import RejectReason, RiskAction, Side
 from ..core.logging import get_logger
 from ..core.models import MarketSnapshot, Order, RiskDecision
-from .base import RiskContext, RiskEngine, RiskRule
+from .base import RiskContext, RiskEngine, RiskRule, RiskStats
 
 __all__ = ["RuleRiskEngine", "RiskStats"]
 
 logger = get_logger("risk.engine")
-
-
-@dataclass(slots=True)
-class RiskStats:
-    """RMS 运行统计（用于验收：拒单率 / 误杀率 / 触发延迟）。"""
-
-    checked: int = 0
-    rejected: int = 0
-    reduced: int = 0
-    paused_events: int = 0
-    force_close_events: int = 0
-    skipped: int = 0
-    by_rule: dict[str, int] = field(default_factory=dict)
-
-    @property
-    def reject_rate(self) -> float:
-        return self.rejected / self.checked if self.checked else 0.0
-
-    @property
-    def reduce_rate(self) -> float:
-        return self.reduced / self.checked if self.checked else 0.0
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "checked": self.checked,
-            "rejected": self.rejected,
-            "reduced": self.reduced,
-            "paused_events": self.paused_events,
-            "force_close_events": self.force_close_events,
-            "skipped": self.skipped,
-            "reject_rate": self.reject_rate,
-            "reduce_rate": self.reduce_rate,
-            "by_rule": dict(self.by_rule),
-        }
 
 
 class RuleRiskEngine(RiskEngine):
@@ -82,10 +47,16 @@ class RuleRiskEngine(RiskEngine):
 
             rules = build_rules(self.config.rules)
         self.rules = sorted(rules, key=lambda r: r.priority)
-        self.stats = RiskStats()
+        self.stats.enabled = bool(self.config.enabled)
         self.config_file = config_file
         self.industry_of = industry_of
         self.returns_of = returns_of
+
+    # ------------------------------------------------------------------ #
+    @property
+    def audit_records(self) -> int:
+        """已写入审计流的记录条数（内存中，落盘文件同样包含这些记录）。"""
+        return len(self.audit)
 
     # ------------------------------------------------------------------ #
     # 核心
@@ -127,9 +98,31 @@ class RuleRiskEngine(RiskEngine):
                 continue
 
             if action is RiskAction.REDUCE:
-                proposed = float(decision.modified_quantity or 0.0)
-                new_quantity = max(0.0, min(quantity, proposed))
+                raw = float(decision.modified_quantity or 0.0)
+                # 缺陷 #13：削减量在此**统一归一化**为可执行股数
+                # （BUY → 整手向下取整；SELL → 整数股向下取整）。
+                # 这是所有规则（无论用 limit_to 还是直接 reduce）的唯一收口处，
+                # 因此不存在「某个规则忘记取整」的可能。
+                proposed = rule.normalize_quantity(ctx, raw)
                 self.stats.by_rule[rule.name] = self.stats.by_rule.get(rule.name, 0) + 1
+                if proposed <= 0 and raw > 0:
+                    # 削减后不足一手 → 数量不可执行。
+                    # 这**不是**风险拒单，不计入 rejected / 拒单率，由引擎丢弃订单
+                    # 并计入 orders_dropped_below_lot（缺陷 #13）。
+                    self.stats.below_lot += 1
+                    return self._finalize(
+                        order,
+                        RiskDecision.reject(
+                            rule.name,
+                            (
+                                f"{decision.message or '风控削减后数量不足一手'}"
+                                f"（不足 {self.lot_size} 股，不可执行）"
+                            ),
+                            reason=RejectReason.BELOW_LOT,
+                        ),
+                        snapshot,
+                    )
+                new_quantity = max(0.0, min(quantity, proposed))
                 if new_quantity <= 0:
                     self.stats.rejected += 1
                     return self._finalize(
@@ -224,6 +217,7 @@ class RuleRiskEngine(RiskEngine):
             engine=self.engine_state,
             industry_of=self.industry_of,
             returns_of=self.returns_of,
+            lot_size=self.lot_size,
         )
 
     def _finalize(self, order: Order, decision: RiskDecision, snapshot: MarketSnapshot) -> RiskDecision:

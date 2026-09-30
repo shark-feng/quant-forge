@@ -28,7 +28,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 import pandas as pd
 
-from ..config.loader import load_risk_config
+from ..config.loader import load_risk_config, resolve_path
 from ..config.schema import BaseConfig, RiskConfig, UniverseConfig, construct
 from ..core.dates import DateLike, to_date
 from ..core.enums import OrderType, RejectReason, RiskAction, SessionPhase, Side
@@ -36,6 +36,7 @@ from ..core.events import EventRecorder
 from ..core.exceptions import AQSError, EngineError
 from ..core.logging import get_logger
 from ..core.models import MarketSnapshot, Order, SignalIntent
+from ..core.quantity import floor_lot, whole_shares
 from ..data.store import DataStore
 from ..portfolio.base import OrderPlan, Portfolio
 from ..risk.base import NullRiskEngine, RiskEngine
@@ -44,6 +45,7 @@ from ..risk.stats import RejectionRecord, evaluate_rejections, summarize_latency
 from ..strategy.base import Strategy, StrategyContext
 from .account import Account
 from .broker import Broker
+from .control import ExposureControlState, plan_exposure_reduction
 from .cost import CostModel
 from .event_loop import EngineEventLoop
 from .matching import MatchingEngine
@@ -51,6 +53,9 @@ from .matching import MatchingEngine
 __all__ = ["BacktestEngine", "BacktestResult"]
 
 logger = get_logger("engine.backtest")
+
+_UNSET: Any = object()
+"""哨兵：区分「未传参」与「显式传 None」。"""
 
 
 @dataclass(slots=True)
@@ -140,6 +145,7 @@ class BacktestEngine:
         risk: RiskEngine | None = None,
         cost_model: CostModel | None = None,
         seed: int | None = None,
+        risk_audit_log: str | None | object = _UNSET,
         on_fill: Callable[[Any], None] | None = None,
         subscribe: Mapping[Any, Callable[[Any], None]] | None = None,
     ) -> None:
@@ -151,12 +157,15 @@ class BacktestEngine:
         self.seed = int(seed if seed is not None else self.config.project.seed)
         self.on_fill = on_fill
         self.risk_config: RiskConfig = self._load_risk_config()
+        self.risk_audit_log = self._resolve_audit_log(risk_audit_log)
         self.risk: RiskEngine = risk or self._build_risk_engine()
         self.loop = EngineEventLoop(on_error="raise")
         for key, handler in dict(subscribe or {}).items():
             self.loop.subscribe(key, handler)
         self._dropped_orders = 0
+        self._dropped_below_lot = 0
         self._rejections: list[RejectionRecord] = []
+        self.exposure_control = ExposureControlState()
 
     # ------------------------------------------------------------------ #
     # 装配
@@ -173,19 +182,46 @@ class BacktestEngine:
         cfg.enabled = bool(cfg.enabled and self.config.risk.enabled)
         return cfg
 
+    def _resolve_audit_log(self, override: str | None | object) -> Path | None:
+        """确定 RMS 审计文件路径（缺陷修复 #6）。
+
+        - 构造参数显式给出 → 以参数为准（``None`` 表示仅内存）；
+        - 未给出 → 用 ``engine.risk_audit_log``；该值为 ``None`` 时跟随 ``risk.yaml`` 的 ``audit_log``；
+          ``""`` / ``"none"`` 表示仅内存；其他值按项目根目录解析为绝对路径。
+        """
+        value: str | None
+        if override is not _UNSET:
+            value = override  # type: ignore[assignment]
+        else:
+            value = self.config.engine.risk_audit_log
+            if value is None:
+                value = self.risk_config.audit_log
+        if value is None or str(value).strip().lower() in ("", "none", "memory"):
+            return None
+        return resolve_path(str(value))
+
     def _build_risk_engine(self) -> RiskEngine:
-        """按配置构建 RMS：启用时使用规则引擎，并注入行业映射与历史收益提供器。"""
+        """按配置构建 RMS：启用时使用规则引擎，并注入行业映射、收益提供器与交易日历。"""
         cfg = self.risk_config
+        audit_log = None if self.risk_audit_log is None else str(self.risk_audit_log)
         if not cfg.enabled:
             logger.info("风控未启用（risk.enabled=false），全部订单放行")
             return NullRiskEngine(dataclasses.replace(cfg, audit_log=None))
         engine = RuleRiskEngine(
-            dataclasses.replace(cfg, audit_log=None),
+            dataclasses.replace(cfg, audit_log=audit_log),
             industry_of=self._industry_lookup,
             returns_of=self._returns_lookup,
             config_file=self.config.risk.config_file,
         )
-        logger.info("风控已启用：%d 条规则（mode=%s）", len(engine.rules), cfg.mode)
+        # 缺陷 #13：整手股数来自配置，注入 RMS 后所有削减量都会被归一化为可执行股数
+        engine.set_lot_size(self.config.engine.lot_size)
+        engine.bind_calendar(self.store.calendar.next_trading_day)
+        logger.info(
+            "风控已启用：%d 条规则（mode=%s，审计日志：%s）",
+            len(engine.rules),
+            cfg.mode,
+            self.risk_audit_log or "仅内存",
+        )
         return engine
 
     def _industry_lookup(self, symbol: str) -> str | None:
@@ -240,7 +276,9 @@ class BacktestEngine:
         universe_records: list[dict[str, Any]] = []
         risk_hook = self._risk_hook()
         self._dropped_orders = 0
+        self._dropped_below_lot = 0
         self._rejections = []
+        self.exposure_control = ExposureControlState()
 
         logger.info(
             "回测开始：%s ~ %s（%d 个交易日），初始资金 %.2f，成交价口径 %s",
@@ -335,6 +373,8 @@ class BacktestEngine:
             len(broker.fills),
             account.total_costs,
         )
+        # 关闭 RMS 审计流，确保审计文件完整落盘（缺陷修复 #6）
+        self.risk.close()
         return result
 
     # ------------------------------------------------------------------ #
@@ -418,47 +458,74 @@ class BacktestEngine:
         account: Account,
         snapshot: MarketSnapshot,
     ) -> list[OrderPlan]:
-        """把 RMS 的组合级动作（减仓 / 强平 / 暂停）落到订单计划上。
+        """把 RMS 的组合级动作（减仓 / 强平 / 暂停）落到订单计划上（缺陷修复 #4）。
 
         - ``target_exposure_scale() < 1``：按「当前敞口 → 目标敞口」生成减仓卖单；
-        - ``force_close``：清仓全部可卖持仓，并丢弃所有买入计划；
-        - ``is_paused``：丢弃所有买入计划（已有持仓保留，卖出仍允许）。
+        - 当日因 T+1 冻结/停牌/跌停无法完成的部分记入 ``pending``，次日优先补减；
+        - 连续未达标超过阈值 → 预警（写入日志与 RMS alerts）；
+        - ``force_close`` / ``is_paused``：丢弃全部买入计划（持仓保留，卖出仍允许）。
         """
         scale = self.risk.target_exposure_scale()
+        controls = self.exposure_control
+        controls.target_scale = scale
+        cfg = self.config.engine.exposure_control
         sells: list[OrderPlan] = []
 
-        if scale < 1.0 and account.positions:
-            total = account.total_value
-            exposure = account.positions_value / total if total > 0 else 0.0
-            if exposure > scale + 1e-6:
-                reduction = 1.0 - (scale / exposure)
-                for symbol in account.holding_symbols:
-                    sellable = account.sellable(symbol)
-                    if sellable <= 0:
-                        continue
-                    quantity = sellable if scale <= 0 else self._round_down(
-                        sellable * reduction, self.config.engine.lot_size
-                    )
-                    if quantity <= 0:
-                        continue
-                    sells.append(
-                        OrderPlan(
-                            symbol,
-                            Side.SELL,
-                            quantity,
-                            tag="risk_reduce" if scale > 0 else "risk_close",
-                            reason=f"target_exposure_scale={scale:.2f}",
-                        )
-                    )
-                if sells:
+        if account.positions:
+            reduction = plan_exposure_reduction(
+                account,
+                snapshot,
+                scale=scale,
+                lot_size=self.config.engine.lot_size,
+                pending=controls.pending if scale < 1.0 else {},
+                tolerance=cfg.tolerance,
+            )
+            sells = list(reduction.orders)
+            if scale < 1.0:
+                controls.pending = dict(reduction.unmet)
+                for symbol in reduction.unmet:
+                    controls.deferred_days[symbol] = controls.deferred_days.get(symbol, 0) + 1
+                controls.deferred_events += len(reduction.unmet)
+                met = reduction.exposure_before <= scale + cfg.tolerance
+                controls.unmet_days = 0 if met else controls.unmet_days + 1
+                controls.max_unmet_days = max(controls.max_unmet_days, controls.unmet_days)
+                if controls.unmet_days == cfg.unmet_warning_days:
                     self.risk.audit.log(
                         "control",
-                        "reduce_exposure",
+                        "exposure_unmet_warning",
                         ts=snapshot.date,
                         target_scale=scale,
-                        current_exposure=exposure,
-                        orders=len(sells),
+                        exposure=reduction.exposure_before,
+                        pending_symbols=sorted(reduction.unmet)[:10],
                     )
+                    logger.warning(
+                        "减仓连续 %d 个交易日未达目标敞口（目标 %.2f，实际 %.2f，待减标的 %s）",
+                        controls.unmet_days,
+                        scale,
+                        reduction.exposure_before,
+                        sorted(reduction.unmet)[:5],
+                    )
+                controls.history.append(
+                    {
+                        "date": snapshot.date,
+                        "target_scale": scale,
+                        "exposure_before": reduction.exposure_before,
+                        "reduction_fraction": reduction.reduction_fraction,
+                        "planned_quantity": reduction.total_planned,
+                        "unmet_symbols": sorted(reduction.unmet),
+                        "unmet_reasons": dict(reduction.reasons),
+                    }
+                )
+            if sells:
+                self.risk.audit.log(
+                    "control",
+                    "reduce_exposure",
+                    ts=snapshot.date,
+                    target_scale=scale,
+                    current_exposure=reduction.exposure_before,
+                    orders=len(sells),
+                    pending=len(reduction.unmet),
+                )
 
         if self.risk.force_close_requested or self.risk.is_paused:
             blocked = sum(1 for p in plans if p.side is Side.BUY)
@@ -474,15 +541,6 @@ class BacktestEngine:
 
         # 卖单在前：T+1 开盘 FIFO 撮合，先释放现金再买入
         return sells + plans
-
-    @staticmethod
-    def _round_down(quantity: float, lot: int) -> float:
-        if quantity <= 0:
-            return 0.0
-        value = float(int(quantity // lot) * lot)
-        if value <= 0 and quantity >= 1:
-            return float(lot) if quantity >= lot else 0.0
-        return value
 
     def _place_orders(
         self,
@@ -517,7 +575,28 @@ class BacktestEngine:
             self.loop.publish_risk_check(snapshot, order, broker.account)
             self.loop.drain()
             if decision.action is RiskAction.REJECT:
-                order.mark_rejected(decision.reject_reason or RejectReason.RISK_REJECTED, by_risk=True)
+                if decision.reject_reason is RejectReason.BELOW_LOT:
+                    # 缺陷 #13：削减后不足一手 → 数量不可执行。
+                    # 这不是风险拒单，因此**不计入拒单率与误杀率**，单独计数并写审计。
+                    order.drop(RejectReason.BELOW_LOT, day=snapshot.date)
+                    self._dropped_below_lot += 1
+                    self.risk.audit.log(
+                        "order",
+                        "dropped_below_lot",
+                        ts=snapshot.date,
+                        order_id=order.order_id,
+                        symbol=order.symbol,
+                        side=order.side.value,
+                        plan_quantity=float(plan.quantity),
+                        lot_size=int(self.config.engine.lot_size),
+                        rule=decision.rule,
+                    )
+                    continue
+                order.mark_rejected(
+                    decision.reject_reason or RejectReason.RISK_REJECTED,
+                    by_risk=True,
+                    day=snapshot.date,
+                )
                 self._record_rejection(order, decision.rule, snapshot)
                 self.risk.on_reject(order, decision, snapshot)
                 continue
@@ -526,10 +605,29 @@ class BacktestEngine:
                 continue
             if decision.action is RiskAction.REDUCE and decision.modified_quantity is not None:
                 original = order.quantity
-                order.quantity = min(order.quantity, float(decision.modified_quantity))
+                # 第二道防御（缺陷 #13）：即使规则层漏了归一化，这里也必须得到可执行股数。
+                # 首要防线在 RuleRiskEngine.check_order，此处只保证「绝不把小数股交给撮合」。
+                order.quantity = min(
+                    order.quantity,
+                    self._normalize_order_quantity(order.side, float(decision.modified_quantity)),
+                )
                 if order.quantity < original:
                     self._record_rejection(order, decision.rule, snapshot, action="reduce", quantity=original)
-            if order.quantity <= 0:
+            # 缺陷 #13：不可执行的剩余数量 → 丢弃订单（不提交撮合，也不计入拒单）
+            if self._is_unexecutable(order):
+                order.drop(RejectReason.BELOW_LOT, day=snapshot.date)
+                self._dropped_below_lot += 1
+                self.risk.audit.log(
+                    "order",
+                    "dropped_below_lot",
+                    ts=snapshot.date,
+                    order_id=order.order_id,
+                    symbol=order.symbol,
+                    side=order.side.value,
+                    quantity=float(order.quantity),
+                    lot_size=int(self.config.engine.lot_size),
+                    rule="post_reduce_check",
+                )
                 continue
             self.loop.publish_order(snapshot, order)
             self.loop.drain()
@@ -537,6 +635,25 @@ class BacktestEngine:
             self.risk.on_order_submitted(order, signal_day)
             submitted.append(order)
         return submitted
+
+    def _normalize_order_quantity(self, side: Side, quantity: float) -> float:
+        """把数量归一化为可执行股数（BUY 整手 / SELL 整数股）。"""
+        if side is Side.BUY:
+            return floor_lot(quantity, int(self.config.engine.lot_size))
+        return whole_shares(quantity)
+
+    def _order_lot(self, side: Side) -> int:
+        return int(self.config.engine.lot_size) if side is Side.BUY else 0
+
+    def _is_unexecutable(self, order: Order) -> bool:
+        """订单数量是否已小到无法执行（缺陷 #13）。
+
+        BUY：不足一手 → 不可执行；SELL：不足 1 股（或为小数）→ 不可执行。
+        """
+        lot = self._order_lot(order.side)
+        if lot > 0:
+            return float(order.quantity) < lot
+        return float(order.quantity) < 1.0
 
     def _record_rejection(
         self,
@@ -601,10 +718,13 @@ class BacktestEngine:
                 "by_rule": {},
             }
         risk_report["latency"] = summarize_latency(self.risk.triggers).as_dict()
-        risk_report["by_rule"] = dict(self.risk.stats.by_rule) if isinstance(self.risk, RuleRiskEngine) else {}
-        risk_report["stats"] = (
-            self.risk.stats.as_dict() if isinstance(self.risk, RuleRiskEngine) else {"checked": 0}
-        )
+        risk_report["stats"] = self.risk.stats.as_dict()
+        risk_report["by_rule"] = dict(self.risk.stats.by_rule)
+        risk_report["exposure_control"] = self.exposure_control.as_dict()
+        risk_report["exposure_control_history"] = list(self.exposure_control.history)
+        risk_report["audit_log"] = str(self.risk_audit_log) if self.risk_audit_log else None
+        risk_report["audit_records"] = len(self.risk.audit)
+        risk_report["alerts"] = self.risk.alerts()
         return {
             "sessions": len(sessions),
             "start": str(start_day),
@@ -612,7 +732,7 @@ class BacktestEngine:
             "t_plus_one": self.config.engine.t_plus_one,
             "execution_price": self.config.engine.execution_price,
             "risk_engine": type(self.risk).__name__,
-            "risk_enabled": bool(self.config.risk.enabled),
+            "risk_enabled": bool(self.risk.stats.enabled),
             "risk_paused": self.risk.is_paused,
             "risk_force_close": self.risk.force_close_requested,
             "risk_exposure_scale": self.risk.target_exposure_scale(),
@@ -621,6 +741,9 @@ class BacktestEngine:
             ),
             "risk": risk_report,
             "alerts": len(self.risk.alerts()),
+            "listed_days_proxy_symbols": len(self.store.proxy_listed_symbols),
+            "listed_days_window_symbols": len(self.store.window_listed_symbols),
+            "listing_date_policy": self.store.config.listing_date.policy,
             "cost_model": self.cost_model.describe(),
             "cost_missing_adv": self.cost_model.missing_adv_count,
             "matching": {
@@ -632,6 +755,8 @@ class BacktestEngine:
             "events_processed": self.loop.stats.processed,
             "events_by_type": dict(self.loop.stats.by_type),
             "orders_dropped_no_next_day": self._dropped_orders,
+            "orders_dropped_below_lot": self._dropped_below_lot,
+            "lot_size": int(self.config.engine.lot_size),
             "open_orders_at_end": len(broker.working),
             "store": self.store.describe(),
             "data_quality_errors": len(quality.errors) if quality else 0,

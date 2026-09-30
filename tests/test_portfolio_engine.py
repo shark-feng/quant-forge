@@ -9,7 +9,7 @@ from aqs.config.loader import load_base_config
 from aqs.data.store import DataStore
 from aqs.data.synthetic import generate_market_data
 from aqs.engine.backtest import BacktestEngine
-from aqs.portfolio.registry import load_portfolio
+from aqs.portfolio.registry import build_portfolio
 from aqs.strategy.ma_cross import MACrossStrategy
 
 START = "2022-01-04"
@@ -34,13 +34,10 @@ def make_setup(*, strategy_params=None, portfolio_overrides=None, symbols: int =
         config=base.data,
         universe_config=base.universe,
     )
+    # 组合配置来源：base.yaml 的 portfolio 段 + 本用例的显式覆盖
+    # （修正：原实现先调用 load_portfolio 再被 build_portfolio 覆盖，属冗余调用）
     section = {"max_positions": 5, "max_weight_per_symbol": 0.15, "cash_buffer": 0.02}
     section.update(portfolio_overrides or {})
-    portfolio = load_portfolio(
-        "configs/strategies/ma_cross.yaml", defaults=base.portfolio, lot_size=base.engine.lot_size
-    )
-    from aqs.portfolio.registry import build_portfolio
-
     portfolio = build_portfolio(section, defaults=base.portfolio, lot_size=base.engine.lot_size)
     strategy = MACrossStrategy(strategy_params or {"fast_window": 5, "slow_window": 20})
     engine = BacktestEngine(store, base, strategy=strategy, portfolio=portfolio)

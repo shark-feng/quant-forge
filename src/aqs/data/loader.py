@@ -24,6 +24,7 @@ __all__ = [
     "ParquetBarLoader",
     "load_market_data",
     "read_table",
+    "describe_data_scope",
 ]
 
 logger = get_logger("data.loader")
@@ -44,6 +45,52 @@ class MarketDataBundle:
     def date_range(self) -> tuple[Any, Any]:
         d = pd.to_datetime(self.bars["date"])
         return d.min(), d.max()
+
+
+def describe_data_scope(
+    bundle: MarketDataBundle,
+    store: Any,
+    *,
+    sample_days: int = 5,
+) -> dict[str, Any]:
+    """说明「数据口径」的四个数量（缺陷修复 #12）。
+
+    这四个数经常被混为一谈，导致「我明明生成了 30 只，怎么只有 12 只在跑」的困惑：
+
+    - ``generated``：**生成/请求**的标的数（合成数据）；
+    - ``with_bars``：**实际有行情**的标的数；
+    - ``index_members``：**进入指数成分**的标的数（股票池候选上限）；
+    - ``universe_avg``：**每日入池**的平均标的数（再经 ST/停牌/上市天数/流动性过滤）。
+    """
+    generated = int(bundle.meta.get("n_symbols", len(bundle.symbols())))
+    with_bars = len(bundle.symbols())
+    union: set[str] = set()
+    index_code: str | None = None
+    if bundle.index_members is not None and len(bundle.index_members):
+        members_frame = bundle.index_members
+        union = set(members_frame["symbol"].astype(str))
+        if "index_code" in members_frame.columns:
+            index_code = str(members_frame["index_code"].iloc[0])
+    days = store.trading_days()
+    step = max(len(days) // max(int(sample_days), 1), 1)
+    sample = list(days[::step])[: max(int(sample_days), 1)]
+    sizes = [len(store.universe(d)) for d in sample]
+    member_counts = (
+        [len(store.index_members(index_code, d)) for d in sample] if index_code is not None else []
+    )
+    return {
+        "generated": generated,
+        "with_bars": with_bars,
+        "index_code": index_code,
+        "index_members_union": len(union),
+        "index_members_avg": (sum(member_counts) / len(member_counts)) if member_counts else 0.0,
+        "index_members_sizes": member_counts,
+        "universe_avg": (sum(sizes) / len(sizes)) if sizes else 0.0,
+        "universe_min": min(sizes) if sizes else 0,
+        "universe_max": max(sizes) if sizes else 0,
+        "universe_sample_days": [str(d) for d in sample],
+        "universe_sizes": sizes,
+    }
 
 
 def read_table(path: str | Path, *, columns: Sequence[str] | None = None) -> pd.DataFrame:

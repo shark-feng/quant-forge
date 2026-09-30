@@ -81,12 +81,17 @@ class RejectionReport:
 
 @dataclass(slots=True)
 class LatencyReport:
-    """触发延迟统计（单位：交易日）。"""
+    """触发延迟统计（单位：交易日）。
+
+    ``n_approx`` 为「未绑定交易日历、退化为 +1 自然日」的条目数；
+    > 0 时说明延迟口径为近似值，报告中必须标注（缺陷修复 #1）。
+    """
 
     n_triggers: int = 0
     by_action: dict[str, int] = field(default_factory=dict)
     by_rule: dict[str, int] = field(default_factory=dict)
     latencies: list[int] = field(default_factory=list)
+    n_approx: int = 0
 
     @property
     def mean_days(self) -> float:
@@ -96,11 +101,17 @@ class LatencyReport:
     def max_days(self) -> int:
         return max(self.latencies) if self.latencies else 0
 
+    @property
+    def approx_ratio(self) -> float:
+        return self.n_approx / self.n_triggers if self.n_triggers else 0.0
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "n_triggers": self.n_triggers,
             "mean_days": self.mean_days,
             "max_days": self.max_days,
+            "n_approx": self.n_approx,
+            "approx_ratio": self.approx_ratio,
             "by_action": dict(self.by_action),
             "by_rule": dict(self.by_rule),
         }
@@ -149,11 +160,13 @@ def evaluate_rejections(
 
 
 def summarize_latency(triggers: Iterable[RiskTrigger]) -> LatencyReport:
-    """汇总触发延迟。"""
+    """汇总触发延迟（含近似条目计数）。"""
     report = LatencyReport()
     for trigger in triggers:
         report.n_triggers += 1
         report.latencies.append(int(trigger.latency_days))
+        if getattr(trigger, "latency_approx", False):
+            report.n_approx += 1
         report.by_action[trigger.action] = report.by_action.get(trigger.action, 0) + 1
         report.by_rule[trigger.rule] = report.by_rule.get(trigger.rule, 0) + 1
     return report

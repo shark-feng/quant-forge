@@ -7,6 +7,7 @@ strategy:
     volume_window: 20           # 均量窗口
     volume_ratio: 1.5           # 放量阈值：volume[T] > mean(volume[T-20..T-1]) × 1.5
     volume_ma_exclude_today: true   # 均量基准不含当日（合同「过去 20 日平均成交量」口径）
+    volume_min_base: 10000      # 均量基准低于该值（股）视为无信号（防长期停牌/新股量比爆炸）
     price_field: close_adj
     include_exits: true
 

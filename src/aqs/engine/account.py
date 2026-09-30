@@ -220,6 +220,11 @@ class Account:
         costs = float(fill.total_cost)
         if qty <= 0:
             return self.positions.get(symbol)
+        # 缺陷 #13：成交股数必须是整数股（A 股不存在小数股）。
+        # 这是内部一致性约束，说明上游（风控削减 / 组合层 / 减仓控制）产生了不可执行的数量，
+        # 属于 bug，因此显式报错而不是静默取整。
+        if abs(qty - round(qty)) > 1e-9:
+            raise EngineError(f"成交股数必须为整数股，收到 {qty!r}（订单 {fill.order_id}）")
 
         if fill.side is Side.BUY:
             pos = self.positions.get(symbol)

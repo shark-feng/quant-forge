@@ -1,0 +1,48 @@
+# 换行与文本/二进制判定（统一规则，避免跨平台与跨编辑器漂移）
+#
+# 背景：本仓库已三次因「文本往返/编码转换」把中文 UTF-8 文件写坏
+# （见 docs/DEVELOPMENT.md §3 与 tests/test_no_mojibake.py）。
+# 换行符是同一类问题的另一面：混用 CRLF/LF 会让 diff 噪音淹没真实改动。
+#
+# 策略：**仓库内与检出后统一 LF**；只有 Windows 专用脚本用 CRLF。
+# 与 .gitignore 的分工：.gitignore 决定「是否入库」，本文件决定「入库后如何存储/检出」。
+
+# 默认：自动识别文本，仓库内与工作区均为 LF
+* text=auto eol=lf
+
+# Windows 专用脚本保留 CRLF（双击/计划任务等场景更稳妥）
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制：禁止换行转换与文本 diff
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.7z binary
+*.xlsx binary
+*.xls binary
+*.woff binary
+*.woff2 binary
+*.parquet binary
+*.feather binary
+*.h5 binary
+*.hdf5 binary
+*.pkl binary
+*.pyc binary
+
+# 语言与 diff 驱动（让 git diff/log 可读性更好）
+*.py diff=python
+*.md diff=markdown
+*.json diff=json
+*.yaml diff=yaml
+*.yml diff=yaml
+
+# 未跟踪的本地数据/输出不做文本处理（呼应 .gitignore，防误加时被当文本转换）
+data/** -text -diff
+reports/** -text -diff

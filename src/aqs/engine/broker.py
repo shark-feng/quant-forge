@@ -28,6 +28,7 @@ from ..core.enums import (
     TimeInForce,
 )
 from ..core.exceptions import EngineError, FutureFunctionError
+from ..core.quantity import floor_lot, sell_quantity
 from ..core.logging import AuditStream, get_logger
 from ..core.models import CostBreakdown, Fill, MarketSnapshot, Order, RiskDecision
 from .account import Account
@@ -43,13 +44,26 @@ RiskHook = Callable[[Order, "Account", MarketSnapshot], RiskDecision]
 
 @dataclass(slots=True)
 class BrokerStats:
-    """经纪商统计（用于回测验收与报告）。"""
+    """经纪商统计（用于回测验收与报告）。
+
+    口径（缺陷修复 #3 / #13）：
+
+    - ``expired``：有效期内未成交而作废（DAY 当日过期 + GTC 顺延超限 + 剩余不可执行）；
+    - ``expired_day``：其中由 ``TimeInForce.DAY`` 语义导致的过期数；
+    - ``expired_residue``：其中因**部分成交后剩余不足一手**而作废的数量（缺陷 #13）；
+    - ``expired_no_remaining``：其中因**剩余数量已被风控削减为 0** 而作废的数量（缺陷 #13）；
+    - ``rejected``：被硬约束或风控拒绝（退市/不足一手/超持仓/风控规则…）；
+    - **过期不计入拒单率**。
+    """
 
     created: int = 0
     submitted: int = 0
     filled: int = 0
     partially_filled: int = 0
     expired: int = 0
+    expired_day: int = 0
+    expired_residue: int = 0
+    expired_no_remaining: int = 0
     rejected: int = 0
     cancelled: int = 0
     deferred_events: int = 0
@@ -63,6 +77,9 @@ class BrokerStats:
             "filled": self.filled,
             "partially_filled": self.partially_filled,
             "expired": self.expired,
+            "expired_day": self.expired_day,
+            "expired_residue": self.expired_residue,
+            "expired_no_remaining": self.expired_no_remaining,
             "rejected": self.rejected,
             "cancelled": self.cancelled,
             "deferred_events": self.deferred_events,
@@ -70,6 +87,14 @@ class BrokerStats:
         }
         d.update({f"reason_{k}": v for k, v in self.reasons.items()})
         return d
+
+    @property
+    def genuine_rejected(self) -> int:
+        """真实拒单数 = ``rejected``（缺陷 #13 后，「剩余不足一手」已不再计入其中）。
+
+        保留此属性是为了让报告层显式表达「拒单率只统计真实拒单」这一口径。
+        """
+        return self.rejected
 
 
 class Broker:
@@ -173,17 +198,23 @@ class Broker:
     def submit_many(self, orders: Sequence[Order]) -> list[Order]:
         return [self.submit(o) for o in orders]
 
-    def cancel(self, order: Order | str, reason: RejectReason = RejectReason.NONE) -> None:
+    def cancel(
+        self,
+        order: Order | str,
+        reason: RejectReason = RejectReason.NONE,
+        *,
+        day: _date | None = None,
+    ) -> None:
         order = self.orders[order] if isinstance(order, str) else order
         if order.status.is_terminal:
             return
-        order.cancel(reason)
+        order.cancel(reason, day=day)
         self._retire(order, OrderStatus.CANCELLED)
 
-    def cancel_all(self, reason: RejectReason = RejectReason.NONE) -> int:
+    def cancel_all(self, reason: RejectReason = RejectReason.NONE, *, day: _date | None = None) -> int:
         count = 0
         for order in list(self.working):
-            self.cancel(order, reason)
+            self.cancel(order, reason, day=day)
             count += 1
         return count
 
@@ -205,6 +236,25 @@ class Broker:
             if order.submit_date is not None and order.submit_date > snapshot.date:
                 continue  # 尚未到期（T+1）
 
+            # DAY 订单只在 submit_date 当日有效：跨到下一个交易日仍未完成 → 过期（不计入拒单）
+            if (
+                order.time_in_force is TimeInForce.DAY
+                and order.submit_date is not None
+                and order.submit_date < snapshot.date
+            ):
+                self.stats.expired += 1
+                self.stats.expired_day += 1
+                order.expire(order.reject_reason, day=snapshot.date)
+                self._retire(order, OrderStatus.EXPIRED)
+                self.audit.log(
+                    "order",
+                    "expired",
+                    ts=snapshot.ts,
+                    order_id=order.order_id,
+                    reason="day_order_session_passed",
+                )
+                continue
+
             if risk_hook is not None:
                 decision = risk_hook(order, self.account, snapshot)
                 self.audit.log(
@@ -216,20 +266,46 @@ class Broker:
                     rule=decision.rule,
                 )
                 if decision.action is RiskAction.REJECT:
-                    order.mark_rejected(decision.reject_reason or RejectReason.RISK_REJECTED, by_risk=True)
+                    order.mark_rejected(
+                        decision.reject_reason or RejectReason.RISK_REJECTED,
+                        by_risk=True,
+                        day=snapshot.date,
+                    )
                     self._retire(order, order.status)
                     self.stats.rejected += 1
                     continue
                 if decision.action is RiskAction.PAUSE:
                     continue  # 暂停：保持挂单，等待恢复
                 if decision.action is RiskAction.REDUCE and decision.modified_quantity is not None:
-                    order.quantity = min(order.quantity, float(decision.modified_quantity))
+                    self._apply_reduce(order, float(decision.modified_quantity))
 
             result = self.matching.try_match(order, snapshot, account=self.account)
             fill = self._handle_result(order, result, snapshot)
             if fill is not None:
                 new_fills.append(fill)
         return new_fills
+
+    def _lot_size_for(self, side: Side) -> int:
+        """该方向适用的整手股数（BUY 需要整手；SELL 只需整数股）。"""
+        return int(self.config.lot_size) if side is Side.BUY else 0
+
+    def _apply_reduce(self, order: Order, modified_quantity: float) -> None:
+        """应用风控削减量（缺陷 #13）。
+
+        两条不变量：
+
+        1. **数量必须是可执行股数**：BUY 向下取整到整手，SELL 向下取整到整数股；
+        2. **INV-6：``filled_quantity <= quantity`` 恒成立**。
+           削减量是对**剩余可下单量**的封顶（RMS 规则以 ``order.remaining`` 为基准计算），
+           因此新的总量 = 已成交 + 被封顶后的剩余，绝不允许把总量压到已成交量之下
+           （旧实现直接 ``min(quantity, modified)``，产生了 ``filled > quantity`` 的
+           自相矛盾订单与只会顺延到期的「僵尸订单」）。
+        """
+        cap = sell_quantity(modified_quantity, self._lot_size_for(order.side))
+        if order.side is Side.BUY:
+            cap = floor_lot(modified_quantity, int(self.config.lot_size))
+        new_remaining = min(order.remaining, cap)
+        order.quantity = order.filled_quantity + max(new_remaining, 0.0)
 
     def _handle_result(self, order: Order, result: MatchResult, snapshot: MarketSnapshot) -> Fill | None:
         if result.filled:
@@ -271,22 +347,80 @@ class Broker:
             )
             return fill
 
-        # 未成交
+        # 未成交：按有效期语义区分「顺延 / 过期 / 拒单」（缺陷修复 #3）
+        self.stats.reasons[result.reason.value] = self.stats.reasons.get(result.reason.value, 0) + 1
+
+        # 缺陷 #13：部分成交后「剩余不足一手」→ **过期**，而不是硬拒单。
+        # 订单确实成交了一部分，把它标成 rejected 会同时造成两个后果：
+        #   (1) orders.csv 出现「已成交但状态为拒单」的自相矛盾记录；
+        #   (2) 拒单率被大量虚增（实测占到 ma_cross 拒单数的 80%）。
+        lot = self._lot_size_for(order.side)
+        if lot > 0 and order.filled_quantity > 0 and 0 < order.remaining < lot:
+            self.stats.expired += 1
+            self.stats.expired_residue += 1
+            order.expire(RejectReason.LOT_SIZE_RESIDUE, day=snapshot.date)
+            self._retire(order, OrderStatus.EXPIRED)
+            self.audit.log(
+                "order",
+                "expired",
+                ts=snapshot.ts,
+                order_id=order.order_id,
+                reason="lot_size_residue",
+                remaining=float(order.remaining),
+                filled=float(order.filled_quantity),
+                lot_size=lot,
+            )
+            return None
+
+        # 缺陷 #13：剩余数量已被削减为 0 → 直接结算，不再无意义顺延（消除僵尸订单）。
+        if order.remaining <= 0:
+            self.stats.expired += 1
+            self.stats.expired_no_remaining += 1
+            order.expire(order.reject_reason, day=snapshot.date)
+            self._retire(order, OrderStatus.EXPIRED)
+            self.audit.log(
+                "order",
+                "expired",
+                ts=snapshot.ts,
+                order_id=order.order_id,
+                reason="no_remaining",
+                filled=float(order.filled_quantity),
+            )
+            return None
+
         if result.can_retry and order.time_in_force is TimeInForce.GTC:
             self.stats.deferred_events += 1
-            self.stats.reasons[result.reason.value] = self.stats.reasons.get(result.reason.value, 0) + 1
-            still_active = order.defer(result.reason)
+            still_active = order.defer(result.reason, day=snapshot.date)
             if not still_active:
                 self.stats.expired += 1
                 self._retire(order, OrderStatus.EXPIRED)
                 self.audit.log(
-                    "order", "expired", ts=snapshot.ts, order_id=order.order_id, reason=result.reason.value
+                    "order",
+                    "expired",
+                    ts=snapshot.ts,
+                    order_id=order.order_id,
+                    reason=result.reason.value,
                 )
             return None
 
-        order.mark_rejected(result.reason)
+        if result.can_retry:
+            # DAY：当日有效，未成交即过期（不计入拒单统计）
+            self.stats.expired += 1
+            self.stats.expired_day += 1
+            order.expire(result.reason, day=snapshot.date)
+            self._retire(order, OrderStatus.EXPIRED)
+            self.audit.log(
+                "order",
+                "expired",
+                ts=snapshot.ts,
+                order_id=order.order_id,
+                reason=f"day_expired:{result.reason.value}",
+            )
+            return None
+
+        # 硬拒绝（退市 / 不足一手 / 超持仓 / 限价未触及 …）
+        order.mark_rejected(result.reason, day=snapshot.date)
         self.stats.rejected += 1
-        self.stats.reasons[result.reason.value] = self.stats.reasons.get(result.reason.value, 0) + 1
         self._retire(order, order.status)
         self.audit.log("order", "rejected", ts=snapshot.ts, order_id=order.order_id, reason=result.reason.value)
         return None

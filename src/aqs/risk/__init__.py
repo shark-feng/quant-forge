@@ -1,4 +1,4 @@
-"""M5 风控 RMS：规则引擎、12+ 条规则、VaR/ES、验收指标。"""
+"""M5 风控 RMS：规则引擎、13 条规则、VaR/ES、验收指标。"""
 
 from __future__ import annotations
 
@@ -9,9 +9,10 @@ from .base import (
     RiskContext,
     RiskEngine,
     RiskRule,
+    RiskStats,
     RiskTrigger,
 )
-from .engine import RiskStats, RuleRiskEngine
+from .engine import RuleRiskEngine
 from .registry import (
     RULE_REGISTRY,
     available_rules,

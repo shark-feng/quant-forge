@@ -141,6 +141,9 @@ def make_config(overrides: Mapping[str, Any] | None = None) -> BaseConfig:
             "liquidity": {"window": 20, "min_amount": 0.0},
             "exclude_st": True,
             "exclude_suspended": True,
+            # 测试夹具多为手工造数、通常不提供 list_date → 用 proxy 策略（显式降级，非静默）。
+            # 生产默认是 strict（configs/base.yaml），两条路径都有专门用例覆盖。
+            "listing_date": {"policy": "proxy"},
         },
         "universe": {"mode": "all", "fallback_to_all": True},
         "engine": {

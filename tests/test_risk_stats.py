@@ -118,7 +118,16 @@ def test_latency_summary_for_control_rules():
     assert report.mean_days == approx(1.0)
     assert report.max_days == 1
     assert report.by_rule["daily_loss_limit"] == 1
-    assert set(report.as_dict()) == {"n_triggers", "mean_days", "max_days", "by_action", "by_rule"}
+    assert report.n_approx == 0
+    assert set(report.as_dict()) == {
+        "n_triggers",
+        "mean_days",
+        "max_days",
+        "n_approx",
+        "approx_ratio",
+        "by_action",
+        "by_rule",
+    }
 
 
 def test_latency_empty():

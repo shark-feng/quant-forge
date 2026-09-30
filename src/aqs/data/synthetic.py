@@ -49,6 +49,15 @@ class SyntheticMarketConfig:
     rebalance_months: tuple[int, ...] = (1, 7)
     base_daily_amount: float = 300_000_000.0   # 日均成交额（元）
     seed_price_scale: tuple[float, float] = (0.5, 3.0)
+    old_listing_offset_days: int = 400    # 「老股」的上市日 = 数据起点 - 该天数（缺陷 #8/#12）
+    industries: tuple[str, ...] = (        # 供 RMS 行业暴露规则使用（缺陷 #12）
+        "银行",
+        "食品饮料",
+        "医药生物",
+        "电子",
+        "房地产",
+        "有色金属",
+    )
     crisis_windows: Mapping[str, tuple[str, str, float]] = field(default_factory=lambda: dict(CRISIS_WINDOWS))
     include_fundamentals: bool = True
     include_index_history: bool = True
@@ -63,28 +72,39 @@ def _trading_days(start: str, end: str) -> list[pd.Timestamp]:
     return [d.normalize() for d in days]
 
 
-def _symbol_codes(n: int, rng: np.random.Generator) -> list[str]:
-    """生成混合板块的证券代码（主板/创业板/科创板）。"""
+_BOARD_FAMILIES: tuple[tuple[str, str, int], ...] = (
+    # (代码前缀, 交易所后缀, 相对权重) —— 权重贴近真实市场构成
+    ("600", "SH", 6),   # 沪市主板
+    ("000", "SZ", 6),   # 深市主板
+    ("300", "SZ", 2),   # 创业板
+    ("688", "SH", 2),   # 科创板
+)
+
+
+def _symbol_codes(n: int, rng: np.random.Generator | None = None) -> list[str]:
+    """生成混合板块的证券代码（确定性、唯一、合法）。
+
+    修复（缺陷 #12）：旧实现按 ``i % 10`` 拼代码并用
+    ``s.replace(".", f"{rng.integers(1,9)}.", 1)`` 去重，一旦重复就会产出
+    ``6000005..SH`` 这类非法代码。现改为**按板块族各自递增分配**，
+    从构造上消除重复（``rng`` 参数保留以兼容旧调用签名）。
+    """
+    if n < 0:
+        raise ValueError("n 不能为负")
+    order: list[int] = []
+    for family_idx, (_, _, weight) in enumerate(_BOARD_FAMILIES):
+        order.extend([family_idx] * weight)
+    counters = [1] * len(_BOARD_FAMILIES)  # 从 001 开始（000000 非法）
     out: list[str] = []
-    for i in range(n):
-        bucket = i % 10
-        if bucket < 6:            # 主板
-            code = f"60{i:04d}" if i % 2 == 0 else f"000{i:03d}"
-        elif bucket < 8:          # 创业板
-            code = f"300{i:03d}"
-        else:                     # 科创板
-            code = f"688{i:03d}"
-        suffix = "SH" if code.startswith("6") else "SZ"
+    i = 0
+    while len(out) < n:
+        family_idx = order[i % len(order)]
+        prefix, suffix, _ = _BOARD_FAMILIES[family_idx]
+        code = f"{prefix}{counters[family_idx]:03d}"
+        counters[family_idx] += 1
         out.append(f"{code}.{suffix}")
-    # 去重兜底
-    seen: set[str] = set()
-    uniq: list[str] = []
-    for s in out:
-        while s in seen:
-            s = s.replace(".", f"{rng.integers(1, 9)}.", 1)
-        seen.add(s)
-        uniq.append(s)
-    return uniq
+        i += 1
+    return out
 
 
 def generate_market_data(
@@ -152,6 +172,7 @@ def generate_market_data(
     delist_dates: list[pd.Timestamp | pd.NaT] = []
     first_idx: list[int] = []
     last_idx: list[int] = []
+    industries: list[str] = []
     for i in range(n_sym):
         if new_list_flags[i] and n_days > 120:
             f = int(rng.integers(60, max(61, n_days - 60)))
@@ -163,8 +184,13 @@ def generate_market_data(
             l = n_days - 1
         first_idx.append(f)
         last_idx.append(l)
-        list_dates.append(days[f] if f > 0 else pd.NaT)
+        # 上市日必须真实存在（缺陷 #8/#12）：新上市股取区间内日期；
+        # 老股取数据起点之前的一段日期（真实市场里老股上市日远早于回测窗口）
+        list_dates.append(
+            days[f] if f > 0 else days[0] - pd.Timedelta(days=cfg.old_listing_offset_days)
+        )
         delist_dates.append(days[l] if l < n_days - 1 else pd.NaT)
+        industries.append(cfg.industries[int(rng.integers(0, len(cfg.industries)))])
 
     # ------------------------- 价格路径 ------------------------- #
     records: list[pd.DataFrame] = []
@@ -249,6 +275,7 @@ def generate_market_data(
                 "is_st": bool(st_flags[i]),
                 "list_date": list_dates[i],
                 "delist_date": delist_dates[i],
+                "industry": industries[i],
             }
         )
         records.append(frame)
@@ -278,7 +305,10 @@ def generate_market_data(
                 if rng.random() < 0.6:
                     continue
                 add = str(pool.pop(0))
-                cur_list = [s for s in current if not _is_delisted(delist_of[s], ts)]
+                # 必须排序：``current`` 是 set，Python 的 str 哈希默认加盐（PYTHONHASHSEED 随机），
+                # 直接迭代 set 会让 ``rng.choice`` 在不同进程中抽到不同标的，
+                # 导致「同一 seed 生成不同指数成分历史」——回测结果不可复现（缺陷 #14）。
+                cur_list = sorted(s for s in current if not _is_delisted(delist_of[s], ts))
                 if not cur_list:
                     break
                 drop = str(rng.choice(cur_list))

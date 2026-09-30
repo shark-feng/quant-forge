@@ -75,7 +75,7 @@ return REDUCE(qty) if qty < order.remaining else ALLOW
 
 规则按优先级执行，`reject/pause/force_close` 立即短路，`reduce` 会累积（取最严格者）。
 
-### 2.2 规则清单（12 条，对应合同 §七）
+### 2.2 规则清单（13 条，对应合同 §七）
 
 | # | 规则 | 默认优先级 | 动作 | 判定 |
 |---|---|---|---|---|
@@ -125,9 +125,30 @@ def var_breach_rate(returns, *, confidence, window) -> BreachResult   # 滚动 V
 
 | 指标 | 定义 | 实现 |
 |---|---|---|
-| 拒单率 | 被拒订单数 / 提交订单数 | `RiskStatsCollector.reject_rate` |
+| 拒单率 | 被拒订单数 / 被检查订单数 | `RiskStats.reject_rate`（同时输出 `enabled`，未启用风控时恒为 0） |
 | 误杀率 | 被拒订单中，事后 N 个交易日按原方向为盈利的比例 | `evaluate_rejections(rejected, store, horizon=5)` |
-| 触发延迟 | 规则条件首次满足日 → 动作生效日 的交易日数 | `RiskTrigger.latency_days`（由引擎记录） |
+| 触发延迟 | 规则条件首次满足日 → 动作生效日 的**交易日数** | `RiskTrigger.latency_days`（由引擎记录） |
+| 触发延迟（近似占比） | 未绑定交易日历、退化为 +1 自然日的比例 | `LatencyReport.n_approx` / `approx_ratio` |
+
+**触发延迟口径（缺陷修复 #1 后与实现完全对齐）**
+
+| 动作类型 | `acted_on` | `latency_days` | 说明 |
+|---|---|---|---|
+| **订单级**（reject / reduce） | 触发当日 | **0** | 决策与生效在同一次订单检查内完成 |
+| **控制类**（pause / force_close） | 触发日的**下一个交易日** | **1** | 日频语义下「立即」= 次日开盘执行 |
+
+- 交易日由引擎注入的解析器给出（`RiskEngine.bind_calendar(store.calendar.next_trading_day)`），
+  **不是**「+1 自然日」——否则跨周末/节假日会算错；
+- 未绑定日历时退化为「+1 自然日」，并把 `RiskTrigger.latency_approx` 置为 `True`，
+  汇总时通过 `n_approx` 单独披露（**不做静默近似**）；
+- 注意：延迟衡量的是「约定生效日」，不是「实际成交日」。若次日因涨跌停/停牌导致减仓顺延，
+  实际完成日会更晚 —— 那部分偏差由 `diagnostics.risk.exposure_control` 记录
+  （见 `docs/10_round2_design.md` 缺陷 #4）。
+
+**拒单率口径（缺陷修复 #7）**：`reject_rate = rejected / checked`。
+风控**未启用**时 `checked` 仍统计引擎询问过的订单数，但 `rejected == 0`，
+因此 `reject_rate == 0` 只表示「未启用风控」，**不代表没有风险**；
+诊断中通过 `stats.enabled` 显式区分。
 
 误杀率的判定口径（必须写进报告）：被拒买单若之后 N 日上涨 → 记为「误杀」；
 被拒卖单若之后 N 日下跌 → 记为「误杀」。**这只是事后视角的近似指标，不代表风控做错了**

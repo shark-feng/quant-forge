@@ -22,6 +22,8 @@ __all__ = [
     "CalendarConfig",
     "LiquidityConfig",
     "QualityConfig",
+    "ListingDateConfig",
+    "ExposureControlConfig",
     "DataConfig",
     "UniverseConfig",
     "MatchingConfig",
@@ -209,7 +211,7 @@ class QualityConfig:
 
 @dataclass(slots=True)
 class DataConfig:
-    provider: str = "synthetic"      # synthetic | csv | parquet
+    provider: str = "synthetic"      # synthetic | csv | parquet | akshare
     root: str = "data/raw"
     adjustment: str = "hfq"          # hfq（后复权）| none
     calendar: CalendarConfig = field(default_factory=CalendarConfig)
@@ -218,10 +220,13 @@ class DataConfig:
     exclude_st: bool = True
     exclude_suspended: bool = True
     quality: QualityConfig = field(default_factory=QualityConfig)
+    listing_date: "ListingDateConfig" = field(default_factory=lambda: ListingDateConfig())
 
     def __post_init__(self) -> None:
-        if self.provider not in ("synthetic", "csv", "parquet"):
-            raise ConfigError("provider 只能是 synthetic/csv/parquet", path="data.provider", value=self.provider)
+        if self.provider not in ("synthetic", "csv", "parquet", "akshare"):
+            raise ConfigError(
+                "provider 只能是 synthetic/csv/parquet/akshare", path="data.provider", value=self.provider
+            )
         if self.adjustment not in ("hfq", "none"):
             raise ConfigError("adjustment 只能是 hfq/none", path="data.adjustment", value=self.adjustment)
         if self.min_list_days < 0:
@@ -285,6 +290,33 @@ class PriceLimitConfig:
 
 
 @dataclass(slots=True)
+class ListingDateConfig:
+    """上市日缺失的处理策略（缺陷修复 #8）。
+
+    - ``strict``（默认）：任何标的缺少 ``list_date`` → 数据质量错误（拒绝构建 ``DataStore``）；
+    - ``proxy``：允许降级为「该标的第几根 K 线」，但必须**显式标记**
+      （``DataStore.listed_days_source`` / 质量报告 / 回测诊断），不得静默。
+    """
+
+    policy: str = "strict"
+    proxy_warn_once: bool = True
+
+    def __post_init__(self) -> None:
+        if self.policy not in ("strict", "proxy"):
+            raise ConfigError(
+                "listing_date.policy 只能是 strict/proxy", path="data.listing_date.policy", value=self.policy
+            )
+
+
+@dataclass(slots=True)
+class ExposureControlConfig:
+    """RMS 减仓/强平的可达性与偏差控制（缺陷修复 #4）。"""
+
+    unmet_warning_days: int = 5        # 连续未达标的交易日数超过该值 → 预警
+    tolerance: float = 0.01            # 敞口容差（目标 ±1% 内视为达标）
+
+
+@dataclass(slots=True)
 class EngineConfig:
     start: _date | None = None
     end: _date | None = None
@@ -293,8 +325,10 @@ class EngineConfig:
     t_plus_one: bool = True
     lot_size: int = 100
     max_defer_days: int = 5
+    risk_audit_log: str | None = None   # None=跟随 risk.yaml；""/"none"=仅内存；其他=路径
     matching: MatchingConfig = field(default_factory=MatchingConfig)
     price_limit: PriceLimitConfig = field(default_factory=PriceLimitConfig)
+    exposure_control: ExposureControlConfig = field(default_factory=ExposureControlConfig)
     benchmark: list[str] = field(default_factory=lambda: ["000300.SH", "000905.SH", "000852.SH"])
 
     def __post_init__(self) -> None:
