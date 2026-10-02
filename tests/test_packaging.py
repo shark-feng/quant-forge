@@ -298,3 +298,42 @@ def test_doc_count_sync_tool_rules_all_match():
     # 分模块表的行正则也必须能命中（否则 docs/03 的逐模块数字会静默过期）
     doc03 = (PROJECT_ROOT / "docs" / "03_acceptance_report.md").read_text(encoding="utf-8")
     assert mod.MODULE_ROW.search(doc03), "docs/03 分模块表行正则已失配"
+
+
+def test_public_package_exports_are_complete_and_unambiguous():
+    """`aqs.data` / `aqs` 的公开导出必须「写了就存在、不重复、不漏关键入口」。
+
+    漏导出属于「不报错但用不了」的一类问题：调用方只能改用内部路径，
+    时间一长就会出现两套并行入口（本项目已多次遇到同类漂移）。
+    """
+    import aqs
+    import aqs.data as data
+
+    for module in (aqs, data):
+        names = module.__all__
+        label = module.__name__
+        assert len(names) == len(set(names)), f"{label}.__all__ 存在重复项"
+        missing = [n for n in names if not hasattr(module, n)]
+        assert not missing, f"{label}.__all__ 声明了但未定义的符号：{missing}"
+
+    # M4 取数层的公开入口必须从包根可达（报告层/CLI 只依赖包根）
+    required = {
+        "DataProvider",
+        "ProviderCapabilities",
+        "Provenance",
+        "ProviderHealth",
+        "DataCache",
+        "RateLimiter",
+        "QualityChecker",
+        "SyntheticProvider",
+        "CsvProvider",
+        "ParquetProvider",
+        "ProviderContext",
+        "build_provider",
+        "provider_capabilities",
+        "available_providers",
+        "register_provider",
+    }
+    exported = set(data.__all__)
+    absent = sorted(required - exported)
+    assert not absent, f"data/__init__.py 缺少 M4 公开导出：{absent}"

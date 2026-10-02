@@ -234,6 +234,15 @@ def load_market_data(
     """按配置装载市场数据，返回归一化后的 :class:`MarketDataBundle`。
 
     ``provider: synthetic`` 用于测试与演示（确定性生成，可复现）。
+
+    .. deprecated:: M4-7
+       这是「进程内直接生成/读盘」的旧入口，只覆盖 synthetic/csv/parquet，
+       且没有能力声明、溯源、缓存与降级披露。**新代码请用**
+       :func:`aqs.data.registry.build_provider` +
+       :func:`aqs.data.loader.ingest_from_provider`（M4-10），
+       以便报告层拿到 `ProviderCapabilities` 与 `IngestReport`。
+       本函数暂时保留（既有 demo/测试仍在使用），长期计划是内部改为委托
+       ``build_provider``，届时两条路径必须逐字段一致（有一致性用例守护）。
     """
     if loader is None and config.provider == "synthetic":
         from .synthetic import generate_market_data

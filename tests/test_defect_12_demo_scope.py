@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -29,6 +30,27 @@ from aqs.data.synthetic import _symbol_codes, generate_market_data
 
 CODE_RE = re.compile(r"^\d{6}\.(SH|SZ)$")
 DEMO = PROJECT_ROOT / "examples" / "demo_backtest.py"
+
+
+def run_cli(*args: str) -> subprocess.CompletedProcess:
+    """以 UTF-8 输出运行 demo CLI。
+
+    **必须显式指定 PYTHONIOENCODING**：子进程被管道捕获时，CPython 按系统 ANSI
+    代码页决定 stdout 编码（本机 ACP=cp936 → 输出 GBK 字节），而调用方按 UTF-8 解码，
+    中文断言会以「内容缺失」的形式失败 —— 那是**环境差异**，不是产品缺陷
+    （人机在 GBK 控制台下看到的中文是正确的）。CI 与本地必须看到同一结果，
+    故与 `tests/test_determinism.py` 采用同一做法：钉住子进程的输出编码。
+    """
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    return subprocess.run(
+        [sys.executable, str(DEMO), *args],
+        capture_output=True,
+        text=True,
+        cwd=str(PROJECT_ROOT),
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -143,14 +165,7 @@ def test_index_size_is_configurable():
 # 4) CLI
 # --------------------------------------------------------------------------- #
 def test_cli_exposes_generate_symbols_and_index_size():
-    proc = subprocess.run(
-        [sys.executable, str(DEMO), "--help"],
-        capture_output=True,
-        text=True,
-        cwd=str(PROJECT_ROOT),
-        encoding="utf-8",
-        errors="replace",
-    )
+    proc = run_cli("--help")
     assert proc.returncode == 0, proc.stderr
     assert "--generate-symbols" in proc.stdout
     assert "--index-size" in proc.stdout
@@ -158,26 +173,12 @@ def test_cli_exposes_generate_symbols_and_index_size():
 
 def test_cli_runs_and_reports_data_scope():
     with workspace_tmp("demo") as tmp:
-        proc = subprocess.run(
-            [
-                sys.executable,
-                str(DEMO),
-                "--generate-symbols",
-                "10",
-                "--index-size",
-                "4",
-                "--start",
-                "2022-01-04",
-                "--end",
-                "2022-06-30",
-                "--output",
-                str(tmp / "out"),
-            ],
-            capture_output=True,
-            text=True,
-            cwd=str(PROJECT_ROOT),
-            encoding="utf-8",
-            errors="replace",
+        proc = run_cli(
+            "--generate-symbols", "10",
+            "--index-size", "4",
+            "--start", "2022-01-04",
+            "--end", "2022-06-30",
+            "--output", str(tmp / "out"),
         )
         assert proc.returncode == 0, proc.stderr[-2000:]
         assert "数据口径" in proc.stdout
@@ -192,24 +193,11 @@ def test_cli_runs_and_reports_data_scope():
 
 def test_cli_deprecated_alias_still_works():
     with workspace_tmp("demo_alias") as tmp:
-        proc = subprocess.run(
-            [
-                sys.executable,
-                str(DEMO),
-                "--symbols",
-                "8",
-                "--start",
-                "2022-01-04",
-                "--end",
-                "2022-03-31",
-                "--output",
-                str(tmp / "out"),
-            ],
-            capture_output=True,
-            text=True,
-            cwd=str(PROJECT_ROOT),
-            encoding="utf-8",
-            errors="replace",
+        proc = run_cli(
+            "--symbols", "8",
+            "--start", "2022-01-04",
+            "--end", "2022-03-31",
+            "--output", str(tmp / "out"),
         )
         assert proc.returncode == 0, proc.stderr[-2000:]
         assert "deprecation" in proc.stdout

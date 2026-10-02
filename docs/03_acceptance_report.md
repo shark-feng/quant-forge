@@ -13,9 +13,9 @@
 | 项目 | 结果 |
 | --- | --- |
 | 测试运行方式 | `python tests/run_tests.py`（零依赖运行器，与 pytest 双兼容） |
-| 用例总数 | **678** |
-| 本机实测结果 | 通过 677 / **跳过 1** / 失败 0（跳过项为环境门控，见下） |
-| 测试模块 | 48 个 |
+| 用例总数 | **693** |
+| 本机实测结果 | 通过 692 / **跳过 1** / 失败 0（跳过项为环境门控，见下） |
+| 测试模块 | 49 个 |
 | 代码规模 | `src/aqs` 46 个文件约 9.0k 行；`tests` 41 个文件约 6.5k 行 |
 
 > **关于 skip（不要读成通过）**：少数用例是**环境门控**的 —— 例如
@@ -68,9 +68,15 @@
 | `test_defect_13_lot_rounding.py` | 31 | **回归 #13** 整手不变量 INV-1~INV-6（削减取整 / 零头过期 / 小数股防线 / 端到端 / DROPPED 终态） |
 | `test_defect_16_provenance.py` | 11 | **回归 #16** 运行溯源（命令/Git/哈希种子写入 summary.json）+ 文档数字一致性 |
 | `test_determinism.py` | 4 | **回归 #14** 跨进程可复现（两个 PYTHONHASHSEED 下数据与回测完全一致） |
-| `test_no_mojibake.py` | 8 | 编码守护（UTF-8 可解码 / 无 U+FFFD / 无乱码特征串），把 PowerShell 教训变成红灯 |
-| `test_packaging.py` | 21 | **M2 工程化**：许可证一致、依赖分组一致、`.gitignore`/`.gitattributes` 覆盖度、**禁止第三方回测框架进依赖**、上传脚本健壮性、README 链接与 AKShare runbook |
+| `test_no_mojibake.py` | 9 | 编码守护（UTF-8 可解码 / 无 U+FFFD / 无乱码特征串），把 PowerShell 教训变成红灯 |
+| `test_packaging.py` | 22 | **M2 工程化**：许可证一致、依赖分组一致、`.gitignore`/`.gitattributes` 覆盖度、**禁止第三方回测框架进依赖**、上传脚本健壮性、README 链接与 AKShare runbook |
 | `test_provider_config.py` | 7 | **M4-1** 取数行为配置：缓存/限流/重试/单位换算的默认值、`base.yaml` 携带、非法值报错、overlay 可达 |
+| `test_provider_abstraction.py` | 8 | **M4-2** 数据源抽象：能力**显式声明**与缺失判定、溯源结构、降级披露文本、协议可判定 |
+| `test_data_cache.py` | 14 | **M4-3** 本地缓存：参数哈希（**不含日期区间**）、schema 版本隔离、TTL 四态判定、增量合并**不丢数据**、manifest、原子写入、key 越界防护 |
+| `test_ratelimit.py` | 15 | **M4-4** 限流与重试：令牌桶（时钟/睡眠可注入）、指数退避+抖动、**空结果默认不重试**、不可重试异常直抛 |
+| `test_data_quality.py` | 20 | **M4-5** 质量检查 Q1~Q12（含 **Q3 手/股量级**、**Q12 幸存者偏差自检**）、阈值可配、报告结构与退出码、纯函数不改输入 |
+| `test_provider_implementations.py` | 8 | **M4-6** synthetic/CSV/Parquet 三实现：能力**由实际列推断**、指数成分**区间相交**过滤（正反例）、pyarrow 环境门控 |
+| `test_provider_registry.py` | 13 | **M4-7** 注册表：未知名报错**不回退**、重名需显式 overwrite、构建期协议闸门、配置层与运行层分工、能力查询 strict/degraded、root 解析口径 |
 
 ---
 
@@ -336,5 +342,5 @@ volume `{filled:211, no_quote:66}`（volume 的 11 笔 `expired` 来自 `no_quot
 | 缺陷 #16 报告数字可追溯 | 已修复（`summary.json. diagnostics.invocation`） |
 | D1 口径更正 | `docs/03` §9 重写：口径定义 + 更正记录 + 重新生成后的真实数字 |
 | M2 工程化 | 文件全部交付并本地提交 `2c46504`；**推送待联网环境** |
-| 测试 | **收集 678 个用例**（48 个模块；第一轮 398 → 本轮 678） |
+| 测试 | **收集 693 个用例**（49 个模块；第一轮 398 → 本轮 693） |
 | 新增机械守护 | 整手不变量 / 跨进程确定性 / 乱码编码 / 工程化一致性 / 文档数字一致性 |

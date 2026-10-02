@@ -336,9 +336,15 @@ class SyntheticDataConfig:
             )
 
 
+#: 内置数据源名单（**唯一来源**；注册表 `data/registry.py` 据此做 import 期自检）。
+#: 注意：配置层是**声明式**的 —— 这里只校验「名字在内置名单内」，
+#: 「这个名字是否真的有实现」由运行时的 `registry.build_provider` 查注册表判定。
+KNOWN_PROVIDERS: tuple[str, ...] = ("synthetic", "csv", "parquet", "akshare")
+
+
 @dataclass(slots=True)
 class DataConfig:
-    provider: str = "synthetic"      # synthetic | csv | parquet | akshare
+    provider: str = "synthetic"      # 取值见 KNOWN_PROVIDERS
     root: str = "data/raw"
     adjustment: str = "hfq"          # hfq（后复权）| none
     calendar: CalendarConfig = field(default_factory=CalendarConfig)
@@ -358,9 +364,11 @@ class DataConfig:
     synthetic: SyntheticDataConfig = field(default_factory=SyntheticDataConfig)
 
     def __post_init__(self) -> None:
-        if self.provider not in ("synthetic", "csv", "parquet", "akshare"):
+        if self.provider not in KNOWN_PROVIDERS:
             raise ConfigError(
-                "provider 只能是 synthetic/csv/parquet/akshare", path="data.provider", value=self.provider
+                f"provider 只能是 {list(KNOWN_PROVIDERS)}（内置名单）",
+                path="data.provider",
+                value=self.provider,
             )
         if self.adjustment not in ("hfq", "none"):
             raise ConfigError("adjustment 只能是 hfq/none", path="data.adjustment", value=self.adjustment)

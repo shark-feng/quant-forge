@@ -333,17 +333,51 @@ Q1~Q12 的判定沿用 `docs/11` §7 表格（其中 **Q3 量级校验**与 **Q1
 ### 4.5 `data/registry.py`
 
 ```python
+@dataclass(frozen=True, slots=True)
+class ProviderContext:                       # 工厂入参：显式传递依赖，不用全局状态
+    name: str
+    config: DataConfig
+    root: Path
+    cache: DataCache | None = None
+    limiter: RateLimiter | None = None
+    client: Any | None = None                # akshare 客户端（生产真库 / 测试 FakeClient）
+    index_members_path: Path | None = None
+    fundamentals_path: Path | None = None
+
+ProviderFactory = Callable[[ProviderContext], DataProvider]
+
 def register_provider(name: str, factory: ProviderFactory, *, overwrite: bool = False) -> None
 def available_providers() -> list[str]
+def get_provider_factory(name: str) -> ProviderFactory
 def build_provider(config: DataConfig | Mapping[str, Any] | None = None, *,
-                   client: Any | None = None,
+                   provider: str | None = None,
+                   root: str | Path | None = None,
                    cache: DataCache | None = None,
-                   limiter: RateLimiter | None = None) -> DataProvider
-def provider_capabilities(name: str) -> ProviderCapabilities     # 不实例化即可查能力
+                   limiter: RateLimiter | None = None,
+                   client: Any | None = None,
+                   index_members_path: str | Path | None = None,
+                   fundamentals_path: str | Path | None = None) -> DataProvider
+def provider_capabilities(name: str, *, config=None, strict: bool = True) -> ProviderCapabilities
 ```
 
 四个内置实现：`synthetic`（默认）、`csv`、`parquet`、`akshare`。
-`build_provider` 对未注册名字抛 `DataError`（与 strategy/portfolio 注册表风格一致）。
+
+- `build_provider` 对未注册名字抛 **`ConfigError`**（A1 决议；与 strategy/portfolio 注册表风格一致），
+  **绝不静默回退到 synthetic**；
+- 工厂返回对象必须满足 `DataProvider` 协议，否则抛 `DataError` 并列出缺失属性（构建期闸门）；
+- **注册表与配置的分工**（A4 决议）：`DataConfig.__post_init__` 只校验
+  `provider in KNOWN_PROVIDERS`（声明式内置白名单，不查注册表）；
+  「名字是否有实现」由 `build_provider` 在运行层查注册表判定；
+- `_unregistered_builtins()` import 期自检「内置名单 - 已注册 - `PENDING_PROVIDERS`」，
+  非空即拒绝导入；分步交付期尚未接入的实现写进 `PENDING_PROVIDERS`（显式状态，M4-8 清空）；
+- `provider_capabilities` 的 **strict / degraded** 两态：`strict` 是**可用性闸门**而非
+  「探测过程是否报错」——文件型 provider 的探测失败表现为「行情抽样失败 → `daily_bars=False`」
+  （见 §4.1：能力探测不抛异常，只写 `notes`），所以闸门必须落在**能力**上：
+  `strict=True` 时构建失败或 `BACKTEST_REQUIRED`（`daily_bars`/`listing_dates`）缺失即抛
+  `DataError`；`strict=False` 时始终返回声明（含全 `False` 下界）并在 `notes` 写明原因 ——
+  「查不到能力」不得伪装成「天生没有这个能力」（能力矩阵报告用 `strict=False`）；
+- `root` 等路径一律复用 `config.loader.resolve_path`（以项目根为基准），
+  避免「换个 CWD 就读到另一个 `data/raw`」这种不报错的失真。
 
 ### 4.6 `data/loader.py` 扩展
 

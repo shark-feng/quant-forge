@@ -4,6 +4,12 @@
 PowerShell 文本往返，把含中文的 UTF-8 文件（`README.md`、`docs/03_acceptance_report.md`、
 `tools/diag_determinism.py`）写成 GBK 乱码而整文件不可用。
 
+第四次观测到的同类陷阱（2026，M4-7）：Windows PowerShell 5.1 的 ``>`` 重定向
+**以 UTF-16LE 写盘**（首字节 ``FF FE``）。把测试输出重定向到仓内 ``.tmp_*.txt``
+会让本守护报「文件不是合法 UTF-8」—— 那是**工作区临时产物**，不是交付物。
+故扫描时跳过 ``.tmp_*`` 前缀（已在 `.gitignore` 中，属于草稿而非交付文件），
+既保留守护强度，又不因「记录一次测试输出」制造假红灯。
+
 纪律写在 `docs/DEVELOPMENT.md`，但纪律依赖人的记忆力；本模块把它变成机械检查。
 
 **能力边界（如实说明）**：这是针对「已知失败模式」的回归守护，不是通用乱码检测器。
@@ -31,6 +37,8 @@ SKIP_DIRS = {
     "reports",
     "data",
 }
+#: 工作区草稿前缀（`.tmp_*`，已在 .gitignore 中）：不属于交付物，不参与乱码扫描
+SKIP_PREFIXES = (".tmp_",)
 
 # 本会话真实损坏文本的片段（全部以 \u 转义书写，避免本模块把自己判为乱码）。
 # 原始正常文本：「诊断脚本：定位…」「哈希…」
@@ -57,6 +65,8 @@ def _iter_files() -> list[Path]:
             continue
         if any(part in SKIP_DIRS for part in path.parts):
             continue
+        if any(part.startswith(SKIP_PREFIXES) for part in path.parts):
+            continue
         if path.suffix.lower() not in SCAN_SUFFIXES:
             continue
         out.append(path)
@@ -76,6 +86,23 @@ def test_repository_has_scannable_files():
     assert len(files) > 50, f"可扫描文件过少（{len(files)}），检查 SKIP_DIRS 是否过滤过猛"
     assert any(f.name == "README.md" for f in files)
     assert any(f.suffix == ".py" for f in files)
+
+
+def test_scratch_skip_rule_excludes_only_drafts():
+    """`.tmp_*` 跳过规则必须有正反例：草稿被跳过、交付物仍被扫描。"""
+    draft = PROJECT_ROOT / ".tmp_mojibake_probe.txt"
+    delivered = PROJECT_ROOT / "mojibake_probe_delivered.txt"
+    try:
+        for path in (draft, delivered):
+            # UTF-16LE（PowerShell 5.1 `>` 的落盘格式）：两者都不是合法 UTF-8
+            path.write_bytes("测试".encode("utf-16-le"))
+
+        scanned = {p.name for p in _iter_files()}
+        assert draft.name not in scanned, "草稿（.tmp_*）应被跳过，否则记录测试输出就会假红灯"
+        assert delivered.name in scanned, "非草稿文件必须照常扫描，跳过规则不能顺手放宽守护"
+    finally:
+        draft.unlink(missing_ok=True)
+        delivered.unlink(missing_ok=True)
 
 
 def test_all_text_files_decode_as_utf8():

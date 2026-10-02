@@ -27,6 +27,9 @@ htmlcov/
 .tmp_tests/
 .tmp_diag/
 .tmp_*/
+# 草稿**文件**（如 .tmp_commitmsg.txt、.tmp_all.txt）：原先只忽略了同名目录，
+# 导致 `git add -A` 会把草稿一起提交（M4-7 实测发生一次）
+.tmp_*
 .tmp/
 .tox/
 .nox/
