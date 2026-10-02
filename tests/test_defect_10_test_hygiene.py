@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Iterator
 
 from tests import run_tests as runner
+from tests.compat import raises
 from tests.tools import PROJECT_ROOT
 
 TESTS_DIR = PROJECT_ROOT / "tests"
@@ -226,4 +227,28 @@ def test_contract_mixin_is_not_collected_as_a_test_class():
     assert not any(
         name.startswith(_ContractMixin.__name__)
         for name, _ in runner._iter_tests(_namespace())
+    )
+
+
+def test_skip_helper_raises_unittest_skiptest():
+    """`skip()` 必须抛 `unittest.SkipTest`，**即使 pytest 可用时也一样**。
+
+    实测（V1，pytest 9.1.1）：`tests/compat.py` 曾把 `skip` 绑成 `pytest.skip`，
+    而 pytest 的 `Skipped` 继承自 **`BaseException`** —— 零依赖运行器只捕获
+    `unittest.SkipTest`/`Exception`，于是**一个 `skip()` 就让整个运行中途退出且不打印摘要**
+    （`RUNNER_EXIT=1`、无「通过/失败」行）。`unittest.SkipTest` 两套运行器都识别，
+    是唯一正确的共同分母。
+    """
+    from tests.compat import skip
+
+    with raises(unittest.SkipTest):
+        skip("probe")
+
+    # 把「为什么危险」编码进测试：pytest 的 Skipped 不是 Exception 子类
+    try:
+        import pytest
+    except ImportError:
+        return
+    assert not issubclass(pytest.skip.Exception, Exception), (
+        "pytest 的 Skipped 若变成 Exception 子类，本守护的前提需重新评估（并更新 docs/17 §10.2）"
     )

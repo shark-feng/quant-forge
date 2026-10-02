@@ -13,7 +13,7 @@
 | 项目 | 结果 |
 | --- | --- |
 | 测试运行方式 | `python tests/run_tests.py`（零依赖运行器，与 pytest 双兼容） |
-| 用例总数 | **772** |
+| 用例总数 | **773** |
 | 本机实测结果 | 通过 771 / **跳过 1** / 失败 0（跳过项为环境门控，见下） |
 | 测试模块 | 52 个 |
 | 代码规模 | `src/aqs` 46 个文件约 9.0k 行；`tests` 41 个文件约 6.5k 行 |
@@ -61,7 +61,7 @@
 | `test_defect_07_risk_stats_schema.py` | 8 | **回归 #7** stats 口径一致性 |
 | `test_defect_08_listing_date.py` | 11 | **回归 #8** 上市日不得静默兜底 |
 | `test_defect_09_volume_ratio_guard.py` | 13 | **回归 #9** 量比基准阈值 |
-| `test_defect_10_test_hygiene.py` | 12 | **回归 #10** 测试代码坏味道（AST 守护）+ **收集规则一致性守护**（运行器 ↔ pytest 规则 ↔ unittest 加载器；含继承方法、`@property`、非 `Test*` 类的正反例） |
+| `test_defect_10_test_hygiene.py` | 13 | **回归 #10** 测试代码坏味道（AST 守护）+ **收集规则一致性守护**（运行器 ↔ pytest 规则 ↔ unittest 加载器；含继承方法、`@property`、非 `Test*` 类的正反例） |
 | `test_defect_12_demo_scope.py` | 12 | **回归 #12** 数据口径四元组与 CLI |
 | `test_defect_11_docs_consistency.py` | 12 | **回归 #11** 文档与代码一致性（AST/正则守护；含 docs/00 与 CHANGELOG 数字守护、选型待核实项附录指引） |
 | `test_defect_15_order_field_semantics.py` | 8 | **回归 #15** 订单字段语义（final_status / last_reject_reason / 顺延历史） |
@@ -347,7 +347,7 @@ volume `{filled:211, no_quote:66}`（volume 的 11 笔 `expired` 来自 `no_quot
 | M2 工程化 | 文件全部交付；**推送由宿主机执行** |
 | **M4 取数层** | **M4-1~M4-10 全部交付**（`102fb3e`…`905dae4`）：抽象 / 缓存 / 限流 / 质量 / 三实现 + AKShare 骨架 / 注册表 / 适配层；成文见 `docs/14_provider_layer.md` |
 | **M4 契约测试** | **4 provider × 8 项 = 32 条**（含区间相交的正反例） |
-| 测试 | **收集 772 个用例**（52 个模块；第一轮 398 → 本轮 772） |
+| 测试 | **收集 773 个用例**（52 个模块；第一轮 398 → 本轮 773） |
 | 新增机械守护 | 整手不变量 / 跨进程确定性 / 乱码编码 / 工程化一致性 / 文档数字一致性 / **收集规则一致性（运行器↔pytest↔unittest）** |
 
 ### 11.1 M4 阶段「不报错、只让结果悄悄失真」类缺陷清单

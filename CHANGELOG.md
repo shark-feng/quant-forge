@@ -69,6 +69,7 @@
 ### 修复
 
 - **#13 订单数量未整手（四层根因，P0）**
+  
   - RMS 削减量本身是小数，且 `_place_orders` 与 `broker.process_open` 两处消费点都只做 `min()` 不取整；
   - 部分成交后「剩余不足一手」被当成**硬拒单**，覆盖 `PARTIALLY_FILLED` 状态并虚增拒单率
     （实测占 ma_cross 拒单数的 80%）；
@@ -85,6 +86,7 @@
   - 回归用例 28 条：`tests/test_defect_13_lot_rounding.py`。
 
 - **#14 回测结果不可复现（P0）**
+  
   - `data/synthetic.py` 迭代 `set` 后把结果交给 `rng.choice`，而 Python 对 `str` 哈希默认加盐
     （`PYTHONHASHSEED` 逐进程变化）→ 同一 seed 生成**不同的指数成分历史**。
   - 实测同一命令连续三次运行得到 313 / 537 / 463 张订单；固定哈希种子后 276 / 630（仍互不相同）。
@@ -92,6 +94,7 @@
   - 回归用例 4 条（**跨进程**、两个不同 `PYTHONHASHSEED`）：`tests/test_determinism.py`。
 
 - **#15 `orders.csv` 的 `reject_reason` 语义易被误读（P2）**
+  
   - `Order.defer()` 把顺延原因写入 `reject_reason` 且成交后不清理，导致
     `status=filled` + `reject_reason=suspended` 这类记录被读成「订单被拒单」。
   - 修复：`to_dict()` 拆出 `final_status` / `last_reject_reason` / `deferred_reasons` /
@@ -99,6 +102,7 @@
   - 回归用例 8 条：`tests/test_defect_15_order_field_semantics.py`。
 
 - **#16 报告数字不可追溯（P1，诊断 D1）**
+  
   - 验收报告曾出现「表内数字来自 30 只标的的运行，落盘的却是 12 只标的的运行」。
   - 修复：新增 `aqs.core.provenance`，把命令行 / Git HEAD / Python 版本 / `PYTHONHASHSEED`
     写入 `reports/<run>/summary.json` 的 `diagnostics.invocation`；
@@ -135,12 +139,12 @@
 
 ### 测试
 
-- 用例数 **398 → 772**（0.1.0 轮次新增 374 条）。按模块点算的构成：
+- 用例数 **398 → 773**（0.1.0 轮次新增 375 条）。按模块点算的构成：
   - 缺陷回归：#13 整手不变量 31 条、#14 跨进程确定性 4 条、#15 字段语义 8 条、#16 运行溯源 11 条；
   - 工程化与文档守护：`test_packaging.py` 20 条、`test_no_mojibake.py` 8 条、
     `test_defect_11_docs_consistency.py` 12 条（含 docs/00、CHANGELOG 数字守护与选型附录指引）；
   - 其余为第二轮缺陷回归（#1~#12）与既有模块用例。
-- 测试：收集 **772** 个用例（52 个测试模块）；环境门控用例以 skip 列出，不计入通过。
+- 测试：收集 **773** 个用例（52 个测试模块）；环境门控用例以 skip 列出，不计入通过。
   M4 阶段新增：配置 7、抽象 8、缓存 14、限流 15、质量 20、provider 实现 8（含 1 条环境门控）。
 
 > 第三轮续接的 5 条新增用例（Q1 的 DROPPED 终态守护 3 条、Q3 上传脚本健壮性 1 条、

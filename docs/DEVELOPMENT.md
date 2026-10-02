@@ -39,6 +39,11 @@
 | 不得把命令输出重定向到仓内文本文件（`.tmp_*` 草稿除外） | Windows PowerShell 5.1 的 `>` 以 **UTF-16LE** 落盘（首字节 `FF FE`），会被 UTF-8 守护判为损坏文件；要留证据请写到仓外临时目录并设 `PYTHONIOENCODING=utf-8`，或用 `cmd /c "... > 文件"` |
 | 测试运行器（`tests/run_tests.py`）与 pytest 必须在**收集阶段**也保持一致 | 引入新的测试组织方式（继承、参数化、fixture、装饰器）时，必须同时验证两种运行器的**收集数**与执行结果一致。收集阶段不一致**不报错**，只会让「看起来全绿」变成「实际没跑」——实测 `vars(Class)` 不含继承方法，mixin 里的契约检查会被运行器收集 0 条、而 pytest 收集 32 条（机械守护见 `tests/test_defect_10_test_hygiene.py`） |
 | 不得复制第二份「用例收集」实现 | 收集逻辑只有 `tests/run_tests.py::_iter_tests` 一份：文档同步工具与文档一致性守护都必须**调用它**。本项目曾有三份独立实现（运行器 / `tools/sync_doc_counts.py` / `test_defect_11` 的 AST 计数），其中两份**各自都错却互相印证**，于是文档数字少算了 2 条而守护全绿 |
+| 不得把 `skip` 机制绑定到只被一种运行器识别的异常 | `tests/compat.py::skip` 统一抛 `unittest.SkipTest`（两套运行器都识别）。实测（V1，pytest 9.1.1）：绑成 `pytest.skip` 后，因 `Skipped` 继承自 **`BaseException`**，零依赖运行器在第一次 `skip()` 时**整体中止且不打印摘要**（退出码 1、无「通过/失败」行）——"没有 FAIL 字样"会被误读成"没有失败"。守护见 `test_defect_10_test_hygiene.py::test_skip_helper_raises_unittest_skiptest` |
+
+> **测试执行约定**：`pyproject.toml` 已设 `addopts = "-q"`，故执行 pytest **不要再传 `-q`**
+> （`-q` + `-q` = `-qq` 会抑制 `N passed` 摘要行，表现为"有进度点、退出码 0、却没有结果行"）。
+> 需要详细输出时用 `-v` 或 `-rA`。详见 `docs/17_round3_diagnostics.md` §10.3。
 
 ## 4. 代码规范
 
@@ -81,7 +86,7 @@
 | M8 | R2-08 偏差与压力套件 | ⏳ `15_testing_suite.md` | — | — | 待设计 |
 | M9 | R2-09 第二阶段设计 | ⏳ `16_phase2_design.md` | — | — | 待设计 |
 
-**当前测试状态**：772 个用例（52 个测试模块）。环境门控用例以 skip 列出，不计入通过。
+**当前测试状态**：773 个用例（52 个测试模块）。环境门控用例以 skip 列出，不计入通过。
 
 ### 第三轮（诊断 + 修复 + 工程化）
 

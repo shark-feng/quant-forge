@@ -396,7 +396,7 @@ cur_list = sorted(s for s in current if not _is_delisted(delist_of[s], ts))
 | --- | --- |
 | `PYTHONHASHSEED` = 0 / 12345 / 777 三次运行 | 订单 704、成交 703、收益 `-15.7304910938%` **完全一致** |
 | 逐日决策指纹（universe/signals/plans/orders/fills） | **完全一致**（0 处差异） |
-| 全套单元测试 | **通过 520 个，失败 0 个**（此数为该阶段快照，最新值见 §8.5：772 用例 / 52 模块） |
+| 全套单元测试 | **通过 520 个，失败 0 个**（此数为该阶段快照，最新值见 §8.5：773 用例 / 52 模块） |
 
 ### 5.4 为什么我在确认前就改了这一行（自我说明）
 
@@ -463,7 +463,7 @@ D1 的更正要求「报告数字必须来自实际落盘文件」，而 D4 使*
 | D4 可复现性 | `synthetic.py` set 迭代 → `sorted` | 跨进程用例（见 §8.4） | ✅ 已修 |
 | D1 数字可追溯 | 新增 `src/aqs/core/provenance.py`；`summary.json` 记录 `diagnostics.invocation`（命令行/Git/Python/PYTHONHASHSEED）；三份报告重新生成 | `test_defect_16_provenance.py`（11 条） | ✅ 全绿 |
 
-**全套测试：556 个用例全部通过（38 个测试模块）。**（此数为该阶段快照，最新值见 §8.5：772 用例 / 52 模块）
+**全套测试：556 个用例全部通过（38 个测试模块）。**（此数为该阶段快照，最新值见 §8.5：773 用例 / 52 模块）
 
 ### 8.2 D2 修复前后对比（30 只标的、2022-01-04~2023-12-29，`tools/diag_lot_invariants.py` 实测）
 
@@ -520,7 +520,7 @@ D1 的更正要求「报告数字必须来自实际落盘文件」，而 D4 使*
 | 本地提交 | ✅ `2c46504`（69 文件，+9126/−390） |
 | **推送到 GitHub** | ❌ **本机无外网**（对外 HTTPS 全部不可达），需在联网环境执行 |
 
-**最终状态：收集 772 个用例（52 个测试模块）。**
+**最终状态：收集 773 个用例（52 个测试模块）。**
 
 > **各阶段测试数快照对照**（每处数字都是**该阶段当时**的实测值，不是笔误）：
 >
@@ -529,7 +529,7 @@ D1 的更正要求「报告数字必须来自实际落盘文件」，而 D4 使*
 > | §5.3 | D4 修复验证（第三轮诊断阶段） | 520 | 36 |
 > | §8.1 | D1~D3 / D4 实施完成（M2 之前） | 556 | 38 |
 > | §8.4 | 补齐编码与确定性守护后 | 600 | 42 |
-> | **§8.5 / 本处** | **M2 工程化 + Q1 终态守护 + Q3 脚本守护 + M3 附录指引（最新）** | **772** | **52** |
+> | **§8.5 / 本处** | **M2 工程化 + Q1 终态守护 + Q3 脚本守护 + M3 附录指引（最新）** | **773** | **52** |
 >
 > 唯一权威值以本节（§8.5）为准；其余处的数字保留作为阶段留痕。
 > `docs/03` 与 `README` 的数字由 `tests/test_defect_11_docs_consistency.py` 机械守护。
@@ -647,3 +647,80 @@ python tests\run_tests.py
 | I1~I6 基线、`stats.rejected` 57/24/68 | `tools/diag_lot_invariants.py` 实跑 |
 | 313/537/463、276/630、704 | `tools/diag_determinism.py` 实跑（见 §5） |
 | 通过 520 / 失败 0 | `python tests\run_tests.py` 实跑（D4 修复阶段的快照；最新值见 §8.5） |
+
+---
+
+## 10. pytest 与运行器等价性实测（V1，2026-10-02）
+
+**背景**：M4-9 阶段本机**未安装 pytest**，因此「运行器与 pytest 收集一致」无法用真实工具验证，
+当时用「独立实现 pytest 查找规则（`dir` + `getattr_static`）+ `unittest.TestLoader` 集合比对」
+作为替代，并明确标注**未用真实 pytest 验证**。本轮 pytest 已就绪（**9.1.1**），
+故对该替代方案做一次真实验证。
+
+### 10.1 实测结果（三项全部一致）
+
+> 数字为**最终值**：验证过程中先测到 772 收集 / 771 通过 / 1 跳过，随后为本次缺陷补了
+> 1 条回归守护（见 10.2 末），故最终为 **773 收集 / 772 通过 / 1 跳过**。
+
+| 维度 | 零依赖运行器 | 真实 pytest | 结论 |
+|---|---|---|---|
+| 收集数 | **773** 用例 / 52 模块 | **773**（`--collect-only` 逐文件求和 773）/ 52 模块 | ✅ 一致 |
+| 逐模块收集数 | 52 个模块逐一对齐 | 逐文件清单 | ✅ **0 个模块不一致** |
+| 全量执行 | 通过 **772** / 跳过 **1** / 失败 **0**（exit 0） | `772 passed, 1 skipped, 5 warnings in 257.81s`（exit 0） | ✅ 一致 |
+| 单模块契约 `test_provider_contract` | 通过 **32** / 失败 0 | `32 passed in 1.23s` | ✅ 一致 |
+
+命令（注意 pytest 不要再传 `-q`，见 10.3）：
+
+```powershell
+python tests\run_tests.py                                    # 772 通过 / 1 跳过 / 0 失败
+python -m pytest                                             # 772 passed, 1 skipped
+python tests\run_tests.py test_provider_contract             # 32 通过
+python -m pytest tests/test_provider_contract.py             # 32 passed
+```
+
+**结论**：M4-9 的替身方案与真实 pytest **一致**，故 `test_defect_10_test_hygiene.py`
+里的等价守护继续保留（它在 pytest 未安装的环境中仍然是唯一的机械保障）。
+
+### 10.2 本次验证抓到的**真实缺陷**（已修，`tests/compat.py`）
+
+**现象**：pytest 装好之后，**零依赖运行器反而失败**（`RUNNER_EXIT=1`），
+且**连「通过/失败」摘要行都不打印** —— 整个运行中途退出。
+
+**根因**：`tests/compat.py` 在 pytest 可导入时把 `skip` 直接绑成 `pytest.skip`。
+pytest 的 `Skipped` 继承自 **`BaseException`**（不是 `Exception`），
+而运行器只捕获 `unittest.SkipTest` 与 `Exception` —— 于是**第一个 `skip()` 调用就把运行器打穿**：
+
+```
+File "tests/run_tests.py", line 83, in main
+    fn()
+File "tests/test_provider_implementations.py", line 294, in test_..._requires_pyarrow...
+    skip("本机已有 pyarrow，本用例仅验证缺失时的报错路径")
+File ".../_pytest/outcomes.py", line 138, in __call__
+    raise Skipped(msg=reason, allow_module_level=allow_module_level)
+Skipped: 本机已有 pyarrow，本用例仅验证缺失时的报错路径
+```
+
+**修复**：`skip` **只定义一次**，统一抛 `unittest.SkipTest`（两套运行器都识别；
+pytest 原生支持该异常并记为 skipped）。`pytest.skip` 另存为 `pytest_skip` 备用。
+
+**为什么这属于「不报错、只让结果失真」家族**：它的触发条件是**环境变化**
+（pytest 从「未安装」变成「已安装」），此时运行器不是"少跑几条"，而是
+**整体中止且没有摘要** —— 只有退出码与缺失的摘要行能提示异常；
+如果 CI 只看"有没有 FAIL 字样"，就会把一次崩溃读成"没有失败"。
+
+**回归守护**（新增，与本节的实测同一次提交）：
+`test_defect_10_test_hygiene.py::test_skip_helper_raises_unittest_skiptest` ——
+断言 `skip()` 抛的是 `unittest.SkipTest`；并在 pytest 可用时断言
+`pytest.skip.Exception` **不是** `Exception` 子类（把"为什么危险"编码进测试，
+若 pytest 将来改变继承关系，该守护会提醒重新评估）。
+
+### 10.3 一处**口径差异**（不是缺陷，已记录）
+
+`pyproject.toml` 里 `[tool.pytest.ini_options] addopts = "-q"`；
+若命令行再加 `-q`，实际生效的是 **`-qq`（比 quiet 更 quiet）→ 摘要行被抑制**
+（表现为：有进度点、退出码 0、但没有 `N passed` 行）。
+这不影响通过/失败判定，但会让"看输出判断结果"的人误以为没有结果。
+
+**约定**：本仓库执行 pytest 时**不再重复传 `-q`**（配置文件已含）；
+需要更详细输出时用 `-v` 或 `-rA`。该差异已写入 `docs/DEVELOPMENT.md` §3。
+
