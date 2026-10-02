@@ -107,6 +107,21 @@ def _symbol_codes(n: int, rng: np.random.Generator | None = None) -> list[str]:
     return out
 
 
+def _position_rng(seed: int, index: int) -> np.random.Generator:
+    """位置 ``index`` 的**独立**随机流（只依赖 ``(seed, index)``）。
+
+    V2 缺陷修复的关键：把「标的的内在属性序列（上市窗口/退市/ST/行业/价格路径）」与
+    「代码分配」解耦。旧实现所有位置共用一个 ``rng``，抽样次数取决于**标的数量与遍历顺序** ——
+    于是同一个位置的属性会随「是否传 ``symbols`` / 传几个 / 什么顺序」而漂移，
+    做 `load_market_data` vs `ingest` 之类的一致性比较时会得出**假结论**。
+
+    现在位置 ``i`` 的每一次抽样都来自 ``default_rng([seed, i])``，
+    故不变量成立：**第 i 个位置的属性只由 (seed, i) 决定**，
+    与传入的代码、数量、顺序全部无关。
+    """
+    return np.random.default_rng([int(seed), int(index)])
+
+
 def generate_market_data(
     *,
     start: Any = None,
@@ -145,8 +160,22 @@ def generate_market_data(
     if not days:
         raise ValueError("合成数据区间内没有交易日")
     n_days = len(days)
-    syms = list(symbols) if symbols else _symbol_codes(cfg.n_symbols, rng)
+
+    # ---- 代码与「位置」解耦（V2）：参数校验 + 每位置独立随机流 ----
+    if symbols is not None:
+        if len(symbols) == 0:
+            # 空序列不再是「没指定」的同义词：旧实现会静默退化为按 n_symbols 自动生成，
+            # 调用方以为「一个标的都不生成」却拿到 30 个。要自动生成请传 None。
+            raise ValueError("symbols 不能为空序列；不传（None）表示按 n_symbols 自动生成")
+        if len({str(s) for s in symbols}) != len(symbols):
+            raise ValueError(
+                f"symbols 存在重复代码：{sorted(map(str, symbols))}；"
+                "重复代码会在 bars 中产生主键 (date, symbol) 重复行"
+            )
+    syms = [str(s) for s in symbols] if symbols else _symbol_codes(cfg.n_symbols)
     n_sym = len(syms)
+    #: 位置 i 的独立随机流（属性与价格路径都取自此流，与代码来源无关）
+    pos_rngs = [_position_rng(cfg.seed, i) for i in range(n_sym)]
 
     # ------------------------- 压力场景漂移 ------------------------- #
     drift = np.full(n_days, cfg.annual_drift / 252.0)
@@ -163,10 +192,11 @@ def generate_market_data(
             vol[mask] *= 1.6
 
     # ------------------------- 标的属性 ------------------------- #
-    st_flags = rng.random(n_sym) < cfg.st_ratio
-    delist_flags = rng.random(n_sym) < cfg.delist_ratio
-    new_list_flags = rng.random(n_sym) < cfg.new_list_ratio
-    price_scale = rng.uniform(*cfg.seed_price_scale, size=n_sym)
+    # 每个位置用自己的随机流：属性序列与 symbols/n_symbols/顺序完全解耦
+    st_flags = np.array([r.uniform() < cfg.st_ratio for r in pos_rngs])
+    delist_flags = np.array([r.uniform() < cfg.delist_ratio for r in pos_rngs])
+    new_list_flags = np.array([r.uniform() < cfg.new_list_ratio for r in pos_rngs])
+    price_scale = np.array([r.uniform(*cfg.seed_price_scale) for r in pos_rngs])
 
     list_dates: list[pd.Timestamp | pd.NaT] = []
     delist_dates: list[pd.Timestamp | pd.NaT] = []
@@ -174,12 +204,13 @@ def generate_market_data(
     last_idx: list[int] = []
     industries: list[str] = []
     for i in range(n_sym):
+        r_i = pos_rngs[i]
         if new_list_flags[i] and n_days > 120:
-            f = int(rng.integers(60, max(61, n_days - 60)))
+            f = int(r_i.integers(60, max(61, n_days - 60)))
         else:
             f = 0
         if delist_flags[i] and n_days - f > 120:
-            l = int(rng.integers(f + 60, n_days - 1))
+            l = int(r_i.integers(f + 60, n_days - 1))
         else:
             l = n_days - 1
         first_idx.append(f)
@@ -190,25 +221,26 @@ def generate_market_data(
             days[f] if f > 0 else days[0] - pd.Timedelta(days=cfg.old_listing_offset_days)
         )
         delist_dates.append(days[l] if l < n_days - 1 else pd.NaT)
-        industries.append(cfg.industries[int(rng.integers(0, len(cfg.industries)))])
+        industries.append(cfg.industries[int(r_i.integers(0, len(cfg.industries)))])
 
     # ------------------------- 价格路径 ------------------------- #
     records: list[pd.DataFrame] = []
     for i, sym in enumerate(syms):
+        r_i = pos_rngs[i]  # 位置独立流：价格路径与 symbols 参数路径无关
         first, last = first_idx[i], last_idx[i]
         m = last - first + 1
         if m <= 0:
             continue
-        r = rng.normal(drift[first : last + 1], vol[first : last + 1], size=m)
+        r = r_i.normal(drift[first : last + 1], vol[first : last + 1], size=m)
         # 偶发跳空（消息冲击）
-        jumps = rng.random(m) < 0.004
-        r[jumps] += rng.normal(0.0, 0.05, size=int(jumps.sum()))
+        jumps = r_i.random(m) < 0.004
+        r[jumps] += r_i.normal(0.0, 0.05, size=int(jumps.sum()))
 
         board = infer_board(sym)
         pct = 0.20 if board.value in ("gem", "star") else (0.05 if st_flags[i] else 0.10)
 
         # 复权因子（除权事件）
-        div = rng.random(m) < cfg.dividend_prob
+        div = r_i.random(m) < cfg.dividend_prob
         div_ratio = np.where(div, 1.0 + cfg.dividend_size, 1.0)
         adj_factor = np.cumprod(div_ratio)
 
@@ -239,19 +271,19 @@ def generate_market_data(
             elif close[t] <= l_dn and t > 0:
                 open_[t] = l_dn
             else:
-                gap = rng.normal(0.0, 0.006)
+                gap = r_i.normal(0.0, 0.006)
                 open_[t] = np.clip(round(p_prev * (1.0 + gap) + 1e-9, 2), l_dn, l_up)
-            hi = max(open_[t], close[t]) * (1.0 + abs(rng.normal(0.0, 0.006)))
-            lo = min(open_[t], close[t]) * (1.0 - abs(rng.normal(0.0, 0.006)))
+            hi = max(open_[t], close[t]) * (1.0 + abs(r_i.normal(0.0, 0.006)))
+            lo = min(open_[t], close[t]) * (1.0 - abs(r_i.normal(0.0, 0.006)))
             high[t] = round(min(max(hi, open_[t], close[t]), l_up) + 1e-9, 2)
             low[t] = round(max(min(lo, open_[t], close[t]), l_dn) + 1e-9, 2)
 
         # 成交量与成交额
         base_vol = cfg.base_daily_amount / np.maximum(close, 1.0)
-        volume = np.round(base_vol * np.exp(rng.normal(0.0, 0.5, size=m)) / 100.0) * 100.0
+        volume = np.round(base_vol * np.exp(r_i.normal(0.0, 0.5, size=m)) / 100.0) * 100.0
 
         # 停牌
-        suspended = rng.random(m) < cfg.suspend_prob
+        suspended = r_i.random(m) < cfg.suspend_prob
         suspended[0] = False
         close[suspended] = np.concatenate([[close[0]], close[:-1]])[suspended]
         open_[suspended] = close[suspended]
@@ -338,22 +370,23 @@ def generate_market_data(
     if cfg.include_fundamentals:
         frows: list[dict[str, Any]] = []
         for i, sym in enumerate(syms):
+            r_i = pos_rngs[i]  # 同样按位置取流：财务数值与 symbols 参数路径无关
             for year in range(pd.Timestamp(cfg.start).year - 1, pd.Timestamp(cfg.end).year + 1):
                 for mmdd, lag in (("03-31", 30), ("06-30", 45), ("09-30", 30), ("12-31", 90)):
                     rp = pd.Timestamp(f"{year}-{mmdd}")
                     if rp < pd.Timestamp(cfg.start) - pd.Timedelta(days=400) or rp > pd.Timestamp(cfg.end):
                         continue
-                    announce = rp + pd.Timedelta(days=int(lag + rng.integers(0, 15)))
+                    announce = rp + pd.Timedelta(days=int(lag + r_i.integers(0, 15)))
                     frows.append(
                         {
                             "symbol": sym,
                             "report_period": rp,
                             "announce_date": announce,
-                            "roe": float(rng.normal(0.10, 0.05)),
-                            "net_profit": float(rng.normal(5e8, 1e8)),
-                            "revenue": float(rng.normal(5e9, 1e9)),
-                            "total_assets": float(abs(rng.normal(2e10, 5e9))),
-                            "total_equity": float(abs(rng.normal(8e9, 2e9))),
+                            "roe": float(r_i.normal(0.10, 0.05)),
+                            "net_profit": float(r_i.normal(5e8, 1e8)),
+                            "revenue": float(r_i.normal(5e9, 1e9)),
+                            "total_assets": float(abs(r_i.normal(2e10, 5e9))),
+                            "total_equity": float(abs(r_i.normal(8e9, 2e9))),
                         }
                     )
         fundamentals = normalize_fundamentals(pd.DataFrame(frows))
