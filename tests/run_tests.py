@@ -37,13 +37,21 @@ def _load_module(path: Path):
 
 
 def _iter_tests(module):
+    """收集模块里的用例：``test_*`` 函数 + ``Test*`` 类中的 ``test_*`` 方法。
+
+    **必须包含继承来的方法**：契约测试（`tests/contracts/provider_contract.py`）把检查项
+    定义在 mixin 里，4 个子类只继承不重写 —— 若只遍历类自身的 ``__dict__``，
+    运行器会收集到 0 条而 pytest 会收集到全部。**收集阶段的不一致不会报错，
+    只会让「看起来全绿」变成「实际没跑」**，故此处与 pytest 的查找规则对齐：
+    沿 MRO 查找 ``test_*`` 属性，且只认函数（``@property`` 之类的描述符不算方法）。
+    """
     for name, obj in vars(module).items():
         if name.startswith("test_") and inspect.isfunction(obj):
             yield name, obj
         elif name.startswith("Test") and inspect.isclass(obj):
             instance = obj()
-            for m_name, m in vars(obj).items():
-                if m_name.startswith("test_") and inspect.isfunction(m):
+            for m_name, m in inspect.getmembers(type(instance), predicate=inspect.isfunction):
+                if m_name.startswith("test_"):
                     yield f"{name}.{m_name}", getattr(instance, m_name)
 
 

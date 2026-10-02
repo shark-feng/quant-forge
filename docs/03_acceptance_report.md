@@ -13,7 +13,7 @@
 | 项目 | 结果 |
 | --- | --- |
 | 测试运行方式 | `python tests/run_tests.py`（零依赖运行器，与 pytest 双兼容） |
-| 用例总数 | **716** |
+| 用例总数 | **720** |
 | 本机实测结果 | 通过 715 / **跳过 1** / 失败 0（跳过项为环境门控，见下） |
 | 测试模块 | 50 个 |
 | 代码规模 | `src/aqs` 46 个文件约 9.0k 行；`tests` 41 个文件约 6.5k 行 |
@@ -61,7 +61,7 @@
 | `test_defect_07_risk_stats_schema.py` | 8 | **回归 #7** stats 口径一致性 |
 | `test_defect_08_listing_date.py` | 11 | **回归 #8** 上市日不得静默兜底 |
 | `test_defect_09_volume_ratio_guard.py` | 13 | **回归 #9** 量比基准阈值 |
-| `test_defect_10_test_hygiene.py` | 6 | **回归 #10** 测试代码坏味道（AST 守护） |
+| `test_defect_10_test_hygiene.py` | 10 | **回归 #10** 测试代码坏味道（AST 守护）+ **收集规则一致性守护**（运行器 ↔ pytest 规则 ↔ unittest 加载器；含继承方法、`@property`、非 `Test*` 类的正反例） |
 | `test_defect_12_demo_scope.py` | 12 | **回归 #12** 数据口径四元组与 CLI |
 | `test_defect_11_docs_consistency.py` | 12 | **回归 #11** 文档与代码一致性（AST/正则守护；含 docs/00 与 CHANGELOG 数字守护、选型待核实项附录指引） |
 | `test_defect_15_order_field_semantics.py` | 8 | **回归 #15** 订单字段语义（final_status / last_reject_reason / 顺延历史） |
@@ -343,5 +343,5 @@ volume `{filled:211, no_quote:66}`（volume 的 11 笔 `expired` 来自 `no_quot
 | 缺陷 #16 报告数字可追溯 | 已修复（`summary.json. diagnostics.invocation`） |
 | D1 口径更正 | `docs/03` §9 重写：口径定义 + 更正记录 + 重新生成后的真实数字 |
 | M2 工程化 | 文件全部交付并本地提交 `2c46504`；**推送待联网环境** |
-| 测试 | **收集 716 个用例**（50 个模块；第一轮 398 → 本轮 716） |
+| 测试 | **收集 720 个用例**（50 个模块；第一轮 398 → 本轮 720） |
 | 新增机械守护 | 整手不变量 / 跨进程确定性 / 乱码编码 / 工程化一致性 / 文档数字一致性 |
