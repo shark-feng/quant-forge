@@ -406,7 +406,46 @@ def ingest_from_provider(provider: DataProvider, *, config: DataConfig,
 
 **降级披露一致性**：`capabilities.index_members=False` 时，`diagnostics["index_members_approximated"]=True`
 且 universe 在这些日期退化为 `all_listed`（与缺陷 #8 的「不得静默兜底」同一原则）；
-同时**把该警告写入 `IngestResult.quality`**（不只是 stdout/日志），使报告层能直接引用。
+同时**把该警告写入 `IngestReport.quality`**（不只是 stdout/日志），使报告层能直接引用。
+
+### 4.8 `loader.ingest_from_provider` 实现决议（M4-10）
+
+实现为 `IngestReport`（比初稿的 `IngestResult` 多一个 `diagnostics` 字段，供 D1 的
+「原始校验报告」与报告层使用）。九步的步骤名固定为
+`calendar / index_members / symbol_meta / bars / fundamentals / industry / normalize / validate / store`
+（`INGEST_STEPS`），取值域 `ok | degraded | failed | skipped`（`STEP_STATUSES`）。
+
+**`skipped` 与 `degraded` 的分界（关键）**：`skipped` **只表示用户显式没请求**
+（如 `fundamentals=False`）；「源不支持该能力」**属于 `degraded`**，不是 `skipped`。
+否则报告层会把「这个源没有财务数据」误读成「这次没要财务数据」。
+
+| 步骤 | 情形 | 步态 | 行为 |
+|---|---|---|---|
+| `symbol_meta` | 源**不支持**上市日（`listing_dates=False`） | `degraded` | 不中止 → 无 meta 模式 → 由 `data.listing_date.policy` 决定（`strict` 由 store 报错 / `proxy` 代理口径并登记披露） |
+| `symbol_meta` | 源声称支持但**抓取失败** | `degraded`（`fallback`）/ 抛错（`fail`） | `failure_policy` 决定 |
+| `fundamentals` / `industry` | 源不支持 | `degraded` | 可选数据，**一律不中止** |
+| `fundamentals` / `industry` | 抓取失败 | `degraded`（`fallback`）/ `failed`（`fail`） | 可选数据，**一律不中止**（`fail` 只体现为「本次无该数据」） |
+| `fundamentals` / `industry` | 用户显式没请求 | `skipped` | 唯一该用 `skipped` 的情形 |
+| `bars` | 取数失败或为空 | 抛 `DataError` | 必需步骤，消息带 `step_status` 快照 |
+| `validate` | `DataQualityReport.errors` 非空 | `failed`（strict，抛 `DataQualityError` 附报告）/ `degraded`（non-strict，继续） | D1：校验错误必须影响步态，不能只做信息记录 |
+| `index_members` | 成分缺失 | `degraded` | `fallback_to_all=True` → 退化全市场并披露；`False` → 抛错（不静默退化） |
+
+**`degradation_notes` 必须具体**（D4）：逐条写明被触发的**既有口径**，例如
+「`is_suspended` 缺失 → 由 `volume<=0` 推断停牌」「`limit_up/limit_down` 缺失 →
+按板块规则推算（主板 10% / 创业板·科创板 20% / 北交所 30% / 主板 ST 5%，取自
+`PriceLimitConfig` 实际值）」「`is_st` 缺失 → 默认 False」——而不是笼统的一句「已降级」。
+
+**两条属性**：`has_errors = (not quality.ok) or step_status["validate"] == "failed"`；
+`overall_status` 按 `failed > degraded > ok` 汇总。
+
+**`manifest` 语义**：只有提供 `cache_manifest()` 的 provider 才有缓存清单；
+无缓存能力时 `manifest == []` **并在 notes 里说明**，避免被误读成「抓取失败」。
+
+**失败原子性**：失败不影响已写入的缓存；重跑时前面步骤走缓存命中，不会重复抓取
+（适配层不清理、不回滚缓存）。
+
+**`capabilities` 语义**：provider 声明它**理论上**具备的能力，不代表本次一定拿到数据；
+本次实际达成情况看 `step_status`。
 
 ### 4.7 `data/akshare_provider.py` 实现决议（M4-8）
 

@@ -13,7 +13,16 @@ from __future__ import annotations
 from .cache import CacheLookup, CacheMeta, DataCache, parquet_available
 from .akshare_provider import AKShareProvider
 from .file_provider import CsvProvider, FileProvider, ParquetProvider
-from .loader import BarDataLoader, CsvBarLoader, ParquetBarLoader, load_market_data
+from .loader import (
+    INGEST_STEPS,
+    STEP_STATUSES,
+    BarDataLoader,
+    CsvBarLoader,
+    IngestReport,
+    ParquetBarLoader,
+    ingest_from_provider,
+    load_market_data,
+)
 from .provider import (
     BACKTEST_REQUIRED,
     CONDITIONAL_REQUIRED,
@@ -123,4 +132,9 @@ __all__ = [
     "CsvBarLoader",
     "ParquetBarLoader",
     "load_market_data",
+    # ---- provider → store 适配层（M4-10）----
+    "IngestReport",
+    "ingest_from_provider",
+    "INGEST_STEPS",
+    "STEP_STATUSES",
 ]

@@ -716,6 +716,14 @@ class AKShareProvider:
         """本次进程内写过的抓取审计记录（测试与诊断用）。"""
         return list(self._audit)
 
+    def cache_manifest(self) -> list[CacheMeta]:
+        """缓存清单（供 `ingest_from_provider` 写进 `IngestReport.manifest`）。
+
+        没有缓存能力的 provider **不提供**本方法 —— 适配层据此区分
+        「未启用缓存」与「缓存清单为空」，而不是让调用方猜。
+        """
+        return self._cache.manifest() if self._cache is not None else []
+
     # ------------------------------------------------------------------ #
     # 客户端
     # ------------------------------------------------------------------ #
