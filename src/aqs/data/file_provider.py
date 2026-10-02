@@ -16,7 +16,6 @@ Parquet 需要 pyarrow；缺失时抛 ``DataError`` 并给出安装提示（**�
 
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -27,7 +26,13 @@ from ..core.dates import DateLike
 from ..core.exceptions import DataError
 from .cache import parquet_available
 from .loader import BarDataLoader, CsvBarLoader, ParquetBarLoader
-from .provider import ProviderCapabilities, ProviderHealth, Provenance, filter_effective_window
+from .provider import (
+    ProviderCapabilities,
+    ProviderHealth,
+    Provenance,
+    filter_effective_window,
+    utc_now,
+)
 
 __all__ = ["FileProvider", "CsvProvider", "ParquetProvider"]
 
@@ -154,7 +159,7 @@ class FileProvider:
         return pd.read_parquet(path)
 
     def health_check(self) -> ProviderHealth:
-        started = datetime.now()
+        started = utc_now()
         errors: list[str] = []
         details: dict[str, Any] = {"root": str(self.root), "name": self.name}
         try:
@@ -167,9 +172,9 @@ class FileProvider:
         except Exception as exc:  # noqa: BLE001
             ok = False
             errors.append(str(exc))
-        latency = (datetime.now() - started).total_seconds() * 1000.0
+        latency = (utc_now() - started).total_seconds() * 1000.0
         return ProviderHealth(
-            ok=ok, checked_at=datetime.now(), latency_ms=latency,
+            ok=ok, checked_at=utc_now(), latency_ms=latency,
             details=details, errors=tuple(errors),
         )
 
@@ -177,7 +182,7 @@ class FileProvider:
     def _prov(self, frame: pd.DataFrame, warnings: tuple[str, ...] = ()) -> Provenance:
         symbols = int(frame["symbol"].nunique()) if len(frame) and "symbol" in frame.columns else 0
         return Provenance(
-            source=self.name, fetched_at=datetime.now(), cache_hit=False,
+            source=self.name, fetched_at=utc_now(), cache_hit=False,
             rows=int(len(frame)), symbols=symbols, warnings=warnings,
         )
 

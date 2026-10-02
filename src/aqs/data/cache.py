@@ -19,7 +19,7 @@ import json
 import os
 import tempfile
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -53,7 +53,19 @@ def parquet_available() -> bool:
 
 
 def _now() -> datetime:
-    return datetime.now()
+    """缓存层「当前时间」：带时区 UTC（与 `provider.utc_now` 同一约定）。"""
+    return datetime.now(timezone.utc)
+
+
+def _as_utc(value: datetime) -> datetime:
+    """把**调用方传入**的时间统一为带时区 UTC。
+
+    naive 值按 **UTC** 解释（而不是本机本地时间）：数据层的时间戳约定是 UTC，
+    且按本地时间解释会让同一份测试在不同机器上得出不同结论（本项目已多次被
+    「机器相关结果」咬到）。历史 manifest 里 naive 的 ``fetched_at`` 是另一回事 ——
+    那是旧版本用 ``datetime.now()``（本地时间）写下的，见 :meth:`CacheMeta.fetched_datetime`。
+    """
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,10 +117,17 @@ class CacheMeta:
 
     @property
     def fetched_datetime(self) -> datetime | None:
+        """解析 ``fetched_at``；**历史写入的 naive 值按其本机本地时区解释**并转为 UTC。
+
+        本项目的数据层时间戳统一为**带时区 UTC**（见 `provider.utc_now`）。
+        早期版本用 ``datetime.now()``（naive 本地时间）写入，直接当 UTC 会偏移一个时区；
+        故对 naive 值调用 ``astimezone(utc)``（Python 语义：naive 视为本地时间）。
+        """
         try:
-            return datetime.fromisoformat(self.fetched_at)
+            dt = datetime.fromisoformat(self.fetched_at)
         except (TypeError, ValueError):
             return None
+        return dt if dt.tzinfo is not None else dt.astimezone(timezone.utc)
 
 
 @dataclass(frozen=True, slots=True)
@@ -236,8 +255,12 @@ class DataCache:
         params: Mapping[str, Any] | None = None,
         now: datetime | None = None,
     ) -> CacheLookup:
-        """命中判定。``hit=True`` 仅当「文件存在 + 版本一致 + 参数哈希一致 + 未过期」。"""
-        now = now or _now()
+        """命中判定。``hit=True`` 仅当「文件存在 + 版本一致 + 参数哈希一致 + 未过期」。
+
+        ``ttl_hours <= 0`` 表示**不做新鲜度判定**（一律视为命中）—— 需要「立即陈旧」的
+        测试请用很小的正数 TTL 并注入 ``now``，不要把 0/负值当成「立刻过期」。
+        """
+        now = _as_utc(now or _now())
         raw = self._read_manifest_raw()
         entry = raw.get(self._entry_key(dataset, key))
         if entry is None:
@@ -273,7 +296,7 @@ class DataCache:
         now: datetime | None = None,
     ) -> CacheMeta:
         """写入样本并更新清单；返回实际落盘的元信息。"""
-        now = now or _now()
+        now = _as_utc(now or _now())
         fmt = self.fmt
         if fmt == "parquet" and not parquet_available():
             fmt = "csv"

@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
@@ -26,7 +26,9 @@ def _bars(dates: list[str], symbol: str = "600000.SH", base: float = 10.0) -> pd
     )
 
 
-NOW = datetime(2026, 9, 30, 12, 0, 0)
+#: 数据层时间戳统一为**带时区 UTC**（见 `provider.utc_now`）：缓存的新鲜度判断要求
+#: 两侧同类型，naive 与 aware 相减会直接抛 TypeError。此处固定一个 UTC 时刻。
+NOW = datetime(2026, 9, 30, 12, 0, 0, tzinfo=timezone.utc)
 PARAMS = {"adjust": "none", "unit_version": 1}
 
 
@@ -286,7 +288,16 @@ def test_cache_meta_round_trips_dict():
         path="/tmp/x.csv",
     )
     assert CacheMeta.from_dict(meta.as_dict()) == meta
-    assert meta.fetched_datetime == datetime(2026, 9, 30, 12, 0, 0)
+    # 历史 manifest 里 naive 的 fetched_at 按**本机本地时间**解释后转 UTC（旧版本写的是本地时间）
+    legacy = meta.fetched_datetime
+    naive = datetime(2026, 9, 30, 12, 0, 0)
+    assert legacy is not None and legacy.tzinfo is not None, "解析结果必须带时区"
+    assert legacy == naive.astimezone(timezone.utc), "naive 历史值应按本地时间换算到 UTC"
+    # 带偏移的字符串原样保留（不做二次换算）
+    aware = CacheMeta.from_dict(
+        {"dataset": "d", "key": "k", "fetched_at": "2026-09-30T12:00:00+00:00"}
+    )
+    assert aware.fetched_datetime == datetime(2026, 9, 30, 12, 0, 0, tzinfo=timezone.utc)
 
 
 def test_cache_rejects_unsupported_format():

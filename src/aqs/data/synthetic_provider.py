@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any, Mapping, Sequence
 
 import pandas as pd
@@ -19,7 +18,13 @@ import pandas as pd
 from ..config.schema import DataConfig, SyntheticDataConfig, as_config
 from ..core.dates import DateLike
 from .loader import MarketDataBundle
-from .provider import ProviderCapabilities, ProviderHealth, Provenance, filter_effective_window
+from .provider import (
+    ProviderCapabilities,
+    ProviderHealth,
+    Provenance,
+    filter_effective_window,
+    utc_now,
+)
 
 __all__ = ["SyntheticProvider"]
 
@@ -70,7 +75,7 @@ class SyntheticProvider:
         )
 
     def health_check(self) -> ProviderHealth:
-        started = datetime.now()
+        started = utc_now()
         try:
             bundle = self._bundle()
             ok = len(bundle.bars) > 0
@@ -83,8 +88,8 @@ class SyntheticProvider:
             errors: tuple[str, ...] = () if ok else ("合成数据为空",)
         except Exception as exc:  # noqa: BLE001 - 健康检查不应抛出
             ok, details, errors = False, {}, (str(exc),)
-        latency = (datetime.now() - started).total_seconds() * 1000.0
-        return ProviderHealth(ok=ok, checked_at=datetime.now(), latency_ms=latency,
+        latency = (utc_now() - started).total_seconds() * 1000.0
+        return ProviderHealth(ok=ok, checked_at=utc_now(), latency_ms=latency,
                               details=details, errors=errors)
 
     # ------------------------------------------------------------------ #
@@ -107,7 +112,7 @@ class SyntheticProvider:
         symbols = int(frame["symbol"].nunique()) if len(frame) and "symbol" in frame.columns else 0
         return Provenance(
             source=source,
-            fetched_at=datetime.now(),
+            fetched_at=utc_now(),
             cache_hit=False,
             rows=int(len(frame)),
             symbols=symbols,
@@ -204,7 +209,7 @@ class SyntheticProvider:
         frame = self._slice(bundle.bars, start, end)
         days = sorted({pd.Timestamp(d).date() for d in pd.to_datetime(frame["date"])})
         prov = Provenance(
-            source="synthetic", fetched_at=datetime.now(), cache_hit=False,
+            source="synthetic", fetched_at=utc_now(), cache_hit=False,
             rows=len(days), symbols=1,
         )
         return days, prov

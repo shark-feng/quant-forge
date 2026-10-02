@@ -405,7 +405,26 @@ def ingest_from_provider(provider: DataProvider, *, config: DataConfig,
 → normalize_* → validate_bars + QualityChecker → DataStore → manifest + 质量报告`
 
 **降级披露一致性**：`capabilities.index_members=False` 时，`diagnostics["index_members_approximated"]=True`
-且 universe 在这些日期退化为 `all_listed`（与缺陷 #8 的「不得静默兜底」同一原则）。
+且 universe 在这些日期退化为 `all_listed`（与缺陷 #8 的「不得静默兜底」同一原则）；
+同时**把该警告写入 `IngestResult.quality`**（不只是 stdout/日志），使报告层能直接引用。
+
+### 4.7 `data/akshare_provider.py` 实现决议（M4-8）
+
+| # | 决议 | 理由 |
+|---|---|---|
+| 1 | **多标的循环显式化**：`fetch_bars` 逐标的调用 + 逐标的缓存；失败只记 warning，比例超过 `data.max_missing_ratio` 升级为 `DataError`；标的数 > 50 时每 10 个写一条 `audit.log`；合并后按 `(date, symbol)` 升序 | AKShare 日线接口一次只查一个代码，`_call` 不能假设「一次拿全」 |
+| 2 | 协议文档新增「**多标的取数约定**」（`provider.py` 的 `DataProvider` docstring）：空序列=不过滤、部分失败语义、合并顺序、主键唯一、闭区间、`Provenance.rows` 口径 | 让四个实现有同一套可断言的对外行为 |
+| 3 | **快照累积是状态不是缓存**：纯函数 `_accumulate_snapshot(cached, current, snapshot_date)`；固定 key（如 `000300.SH`，不带日期）；`meta.start/end` 表示已累积区间；**同日重复抓取幂等**（内容不同则保留首次并告警） | 历史成分只能靠逐日观测累积，key-value 缓存语义表达不了「新进/退出/留存」 |
+| 4 | 成交量 **手→股**用模块常量 `_DEFAULT_VOLUME_TO_SHARES = 100.0`，**不读** `data.unit_conversion`；并在 `capabilities().notes` 写明已换算 | 该配置默认 1.0，使用者一旦忘改，量纲整体错 100 倍且**不报错**；配置被显式改非默认值时，会在 warnings 里披露该覆盖无效 |
+| 5 | 时间戳统一 `provider.utc_now()`（带时区 UTC）；缓存层的 `now` 入参也统一规整为 UTC（naive 按 **UTC** 解释，历史 manifest 的 naive 值按**本地时间**换算） | naive/aware 相减会直接抛 `TypeError`；且按本地时间解释会让测试结果随机器变化 |
+| 6 | `fetch_trading_calendar` 缓存存**表**（单列 `date`），对外转升序去重的 `list[date]`，`Provenance.rows = len(days)` | 单一存储形态，避免「同一数据集两种落盘格式」 |
+| 7 | 指数成分**声明不可用但仍返回数据 + 具体警告**（写明 index_code、请求区间、快照日、后果） | 数据是真的，只是语义不满足历史要求；返回空表等于假装没有数据，静默当历史用则造成幸存者偏差 |
+
+**能力声明（未经联网探测前的保守口径）**：`daily_bars` / `adjustment_factors` / `listing_dates` /
+`fundamentals` / `industry` 为 `True`；`index_members` / `suspensions` / `price_limits` /
+`st_flags` / `delistings` / `market_cap` / `intraday` 为 `False`。
+`industry` 声明为 `True` 的理由：它以 `effective_from/effective_to` 区间累积，且 note 明确
+「首次抓取日之前不可得」；而指数成分直接决定股票池、误用即幸存者偏差，故按最严标准声明。
 
 ---
 

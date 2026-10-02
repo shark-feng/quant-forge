@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 from .cache import CacheLookup, CacheMeta, DataCache, parquet_available
+from .akshare_provider import AKShareProvider
 from .file_provider import CsvProvider, FileProvider, ParquetProvider
 from .loader import BarDataLoader, CsvBarLoader, ParquetBarLoader, load_market_data
 from .provider import (
@@ -22,6 +23,7 @@ from .provider import (
     Provenance,
     degradation_notes,
     filter_effective_window,
+    utc_now,
 )
 from .quality import (
     QualityChecker,
@@ -69,6 +71,7 @@ __all__ = [
     "CONDITIONAL_REQUIRED",
     "degradation_notes",
     "filter_effective_window",
+    "utc_now",
     # ---- 缓存（M4-3）----
     "DataCache",
     "CacheMeta",
@@ -83,11 +86,12 @@ __all__ = [
     "QualityFinding",
     "QualityThresholds",
     "ProviderQualityReport",
-    # ---- provider 实现（M4-6）----
+    # ---- provider 实现（M4-6 / M4-8）----
     "SyntheticProvider",
     "FileProvider",
     "CsvProvider",
     "ParquetProvider",
+    "AKShareProvider",
     # ---- 注册表（M4-7）----
     "PROVIDER_REGISTRY",
     "PENDING_PROVIDERS",

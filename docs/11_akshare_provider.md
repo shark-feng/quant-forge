@@ -161,6 +161,21 @@ def build_provider(config) -> DataProvider      # synthetic|csv|parquet|akshare
 def available_providers() -> list[str]
 ```
 
+> **实现顺序修正（M4-8 决议 B3）**：`_call` 的实际顺序是
+> **缓存 → 限流 → 重试 → 映射 → 回写**，而不是上面注释里的「限流→重试→缓存→标准化」。
+> 理由：缓存命中还先限流等于白排队，而「完全不触碰网络」才是缓存存在的意义。
+> 附带两条：
+> 1. **增量收窄**：`incremental` 策略下若存在陈旧缓存，只请求 `(缓存最后日期+1) ~ end`；
+>    若缓存已覆盖请求区间，则**一个请求都不发**并如实披露「本次未刷新缓存」；
+> 2. **失败策略**（`data.failure_policy`）：`fallback` → 返回陈旧快照 +
+>    `Provenance(cache_hit=True, warnings=(…含数据截至日…))`；`fail` → 抛 `DataError`；
+>    无快照可退时**两种策略都抛**（不凭空造数据）。
+>
+> 另有三处 M4-8 实现决议（`docs/18` §4.7 有完整记录）：成交量 **手→股** 用模块常量而非配置
+> （配置默认 1.0 一旦忘改会整体错 100 倍且不报错）；指数成分接口只给**当前**成分，
+> 故 `capabilities().index_members=False`，调用时仍返回快照并附**具体**警告；
+> 快照累积（指数成分/行业）是**状态**而非缓存，固定 key + 区间闭合 + 同日幂等。
+
 ### 5.1 与现有 `DataStore` 的适配层
 
 ```python

@@ -29,6 +29,7 @@ from typing import Any, Callable, Mapping
 from ..config.loader import resolve_path
 from ..config.schema import KNOWN_PROVIDERS, DataConfig, as_config
 from ..core.exceptions import ConfigError, DataError
+from .akshare_provider import AKShareProvider
 from .cache import DataCache
 from .file_provider import CsvProvider, ParquetProvider
 from .provider import DataProvider, ProviderCapabilities
@@ -48,8 +49,8 @@ __all__ = [
 ]
 
 #: 分步交付期的**显式**状态：已列入 KNOWN_PROVIDERS 但实现尚未接入。
-#: M4-8 接入 akshare 后清空（并由测试断言其为空），届时自检自动生效。
-PENDING_PROVIDERS: tuple[str, ...] = ("akshare",)
+#: M4-8 已接入 akshare，故为空；自检随之全面生效（漏注册任何内置源都会在 import 期报错）。
+PENDING_PROVIDERS: tuple[str, ...] = ()
 
 #: `DataProvider` 协议要求的全部属性名（方法 + 数据成员），
 #: 由协议自身派生而非手抄，避免与 `provider.py` 漂移。
@@ -289,10 +290,22 @@ def _make_parquet(ctx: ProviderContext) -> DataProvider:
     )
 
 
+def _make_akshare(ctx: ProviderContext) -> DataProvider:
+    """AKShare：``client`` / ``cache`` / ``limiter`` 由上下文注入（生产为 None → provider 自建）。
+
+    注意 ``client=None`` 时 provider 会**惰性** import akshare（未安装则报 DataError，
+    不静默换源）—— 故这里**不能**替它构造客户端，否则「构建即联网」。
+    """
+    return AKShareProvider(
+        ctx.config, client=ctx.client, cache=ctx.cache, limiter=ctx.limiter
+    )
+
+
 for _name, _factory in (
     ("synthetic", _make_synthetic),
     ("csv", _make_csv),
     ("parquet", _make_parquet),
+    ("akshare", _make_akshare),
 ):
     register_provider(_name, _factory)
 

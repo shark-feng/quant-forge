@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Protocol, Sequence, runtime_checkable
 
 import pandas as pd
@@ -33,7 +33,19 @@ __all__ = [
     "BACKTEST_REQUIRED",
     "degradation_notes",
     "filter_effective_window",
+    "utc_now",
 ]
+
+
+def utc_now() -> datetime:
+    """数据层统一时间戳：**带时区的 UTC**。
+
+    为什么集中在这里：``Provenance.fetched_at`` / ``ProviderHealth.checked_at`` /
+    缓存元信息的 ``fetched_at`` 必须可比较、可跨机器复现。若各 provider 各自用
+    ``datetime.now()``（本机本地时间的 naive 值），跨时区/跨机器的「新鲜度」判断会差出
+    一个时区，且 naive 与 aware 相减会直接抛 ``TypeError``。
+    """
+    return datetime.now(timezone.utc)
 
 #: 任何市场数据源都必须具备的能力（缺一不可，否则无法回测）
 BACKTEST_REQUIRED: tuple[str, ...] = ("daily_bars", "listing_dates")
@@ -198,7 +210,24 @@ class DataProvider(Protocol):
       （是否致命由上层的 ``capabilities().missing_required()`` 决定）；
     - ``fetch_trading_calendar`` 返回升序去重的 ``list[date]``；
     - ``volume`` 单位统一为**股**、``amount`` 统一为**元**（换算由 provider 按
-      ``data.unit_conversion`` 完成，见 Q3）。
+      ``data.unit_conversion`` 完成，见 Q3）；
+    - 时间戳（``Provenance.fetched_at`` / ``ProviderHealth.checked_at``）统一用
+      :func:`utc_now`（带时区 UTC），不得各 provider 自行取本地时间。
+
+    **多标的取数约定**（每个方法一致，避免「一次调用拿全部」的隐性假设）：
+
+    1. ``symbols`` 为空序列 ``[]`` 表示**不过滤**（返回该源能提供的全部标的）；
+       非空则只返回请求的标的，**不存在的标的进 warnings，不抛异常**；
+    2. 一次调用内部**允许**按标的循环（例如 AKShare 的日线接口一次只查一个代码，
+       ``AKShareProvider`` 会逐标的调用并逐标的缓存）。循环粒度对上层的可见影响：
+       ``Provenance.rows/symbols`` 覆盖整次调用，单个标的是否命中缓存放进 warnings；
+    3. 部分失败按 ``config.max_missing_ratio`` 判定：单个标的失败 → 跳过并记 warning；
+       失败比例**超过**阈值 → 抛 ``DataError``（不静默返回残缺面板）；
+    4. 合并顺序固定：按 ``(date, symbol)`` 升序、``reset_index(drop=True)``；
+       **主键 ``(date, symbol)`` 唯一**，重复行由「后取到的覆盖先前的」处理；
+    5. 请求区间语义：返回的行满足 ``start <= date <= end``（闭区间，两端都被断言）；
+    6. 每次调用必须返回**非 None** 的 ``Provenance``，且 ``rows == len(frame)``
+       （``fetch_trading_calendar`` 为 ``len(days)``）。
     """
 
     name: str
