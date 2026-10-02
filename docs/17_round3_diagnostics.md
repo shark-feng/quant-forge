@@ -490,6 +490,11 @@ D1 的更正要求「报告数字必须来自实际落盘文件」，而 D4 使*
 | breakout | 48 | 26 | 22 | 0 | 48 | 48 | 0 | 0 | +8.82% |
 | volume | 211 | 80 | 75 | 56 | 222 | 211 | 11 | 0 | -15.94% |
 
+> ⚠️ **本表是 D1 阶段（提交 `d15ab7c`）的快照**。V2（`df96db7`）修改了合成数据的随机流
+> （每位置独立子流），**这些数值无法再从 HEAD 复现**，只能从对应提交复现；
+> 它们是「当时实测」的留痕，不再代表当前口径。
+> **当前权威数字见 `docs/03_acceptance_report.md` §9.2**（同一命令、`git=df96db7` 重新生成）。
+
 ### 8.4 守护已落地
 
 - **跨进程确定性测试** `tests/test_determinism.py`（4 条）：两个不同 `PYTHONHASHSEED`
@@ -637,13 +642,17 @@ python tests\run_tests.py
 
 ## 附录 B：落盘文件与实测数字对照
 
+> ⚠️ 本表按**当前落盘产物**（`git=df96db7`，V2 后重新生成）核对；
+> 括号内为 V2 之前的旧值，仅作留痕 —— 生成器随机流已变更，旧值不可从 HEAD 复现。
+
 | 数字 | 来源 |
 | --- | --- |
-| trades 112 / buy 58 / sell 54 / exit 54 | `reports/ma_cross/trades.csv` |
-| orders 112：filled 97 / rejected 8 / risk_rejected 4 / expired 3 | `reports/ma_cross/orders.csv` |
-| `match_stats = {filled 112, lot_size 8, suspended 1}` | `reports/ma_cross/summary.json` |
-| `data_scope.generated = 12`、`sessions = 259`、`total_return = -5.61%` | `reports/ma_cross/summary.json` |
-| breakout 48 / volume 211 笔成交 | `reports/<run>/trades.csv` |
+| trades 125 / entry 67 / exit 58 / risk_reduce 0 | `reports/ma_cross/trades.csv`（旧：112 / 58 / 54 / 0） |
+| orders 125：filled 125 / risk_rejected 0 / expired 0 | `reports/ma_cross/orders.csv` |
+| `match_stats = {filled 125}` | `reports/ma_cross/summary.json`（旧：`{filled 112, suspended 1}`） |
+| `data_scope.generated = 12`、`sessions = 259`、`total_return = +1.36%` | `reports/ma_cross/summary.json`（旧：-5.61%） |
+| breakout 51 / volume 136 笔成交 | `reports/<run>/trades.csv`（旧：48 / 211） |
+| RMS 检查 250/107/278、风控拒单 0/5/4、`below_lot` 0/0/1 | `reports/<run>/summary.json` → `diagnostics.risk.stats` |
 | I1~I6 基线、`stats.rejected` 57/24/68 | `tools/diag_lot_invariants.py` 实跑 |
 | 313/537/463、276/630、704 | `tools/diag_determinism.py` 实跑（见 §5） |
 | 通过 520 / 失败 0 | `python tests\run_tests.py` 实跑（D4 修复阶段的快照；最新值见 §8.5） |
@@ -723,4 +732,57 @@ pytest 原生支持该异常并记为 skipped）。`pytest.skip` 另存为 `pyte
 
 **约定**：本仓库执行 pytest 时**不再重复传 `-q`**（配置文件已含）；
 需要更详细输出时用 `-v` 或 `-rA`。该差异已写入 `docs/DEVELOPMENT.md` §3。
+
+---
+
+## 11. V2：同 API 不同参数路径产出不同**内在状态**（`generate_market_data`）
+
+### 11.1 缺陷
+
+`generate_market_data(symbols=None)` 与 `generate_market_data(symbols=[...])` 的标的属性
+（上市窗口 / 退市标记 / ST 标记 / 行业 / **价格路径** / 财务数值）**不是同一份**。
+根因：所有位置**共用一个 `rng` 顺序抽样**，抽样次数取决于**标的数量与遍历顺序**，
+于是「位置 i 的属性」随参数路径漂移。后果不是报错，而是
+**做「两个入口一致性」比较时得出假结论**。
+
+**这不是推测，而是实际发生过一次**：M4-10 首次做 `load_market_data` vs `ingest` 一致性比较时，
+把 `sorted(...)` 的标的列表传给旧入口 → 属性重排 → 判定「两个入口数据不同」，
+并一度用「两边都不传 `symbols`」绕过 —— 那时掩盖了真正的问题（股票池对齐）。
+
+### 11.2 实测（修复前，`seed=4242`，2022-01-04 ~ 2022-06-30）
+
+| 场景 | 结果 |
+|---|---|
+| 传**内部生成顺序**的同一份代码 vs 不传 | **完全一致**（说明「同长度 + 同顺序」本来没问题） |
+| **只传前 4 个**（长度截断） | 前 4 个位置的属性**全部改变**（例：600001 价格路径 8.2 → 20.11）← 真缺陷 |
+| **逆序**传入 | 属性跟随**位置**、代码跟随列表顺序（顺序语义，见 11.4） |
+| 传**重复代码** | **不报错**，产出 128 行主键 `(date, symbol)` 重复 ← 顺带发现的真缺陷 |
+| `symbols=[]` | **静默退化**为「按 n_symbols 自动生成」（调用方以为生成 0 只）← 顺带发现的真缺陷 |
+
+### 11.3 修复
+
+- 位置 `i` 的**每一次抽样**都取自独立子流 `_position_rng(seed, i)` =
+  `default_rng([seed, i])`：属性、价格路径、财务数值**全部**按位置取流；
+- 不变量：**第 i 个位置的属性只由 `(seed, i)` 决定**，与传入的代码 / 数量 / 顺序**无关**；
+- 两处静默错误改为显式报错：重复 `symbols` → `ValueError`（消息说明会产生主键重复行）；
+  `symbols=[]` → `ValueError`（**不传 `None`** 才表示自动生成）；
+- 回归用例 8 条：`tests/test_synthetic_parameters.py`（正例 + **数量截断** + 顺序语义 +
+  非法入参 + 确定性，且比较为**逐行逐列含 dtype**）。
+
+### 11.4 语义边界（刻意，必须写在文档里）
+
+**属性属于「位置」，代码由调用方列表顺序决定。** 因此
+「同一个代码在不同顺序下拿到不同属性」是**预期行为**，不是缺陷：
+
+- 要复现「不传 symbols」的那份数据，就要传**内部生成顺序**的代码
+  （`_symbol_codes(n)` 即该顺序）；
+- 做一致性比较时，两侧要么**同序**，要么**两侧都不传** `symbols`；
+- 指数成分历史天然依赖股票池构成（池子不同则换入换出不同），**不在本不变量范围内**。
+
+### 11.5 连带影响（一次性）
+
+随机流改变 ⇒ **合成数据的全部数值随之改变**。已按 `docs/03` §9.2 记录的同一条命令
+重新生成三份报告并刷新该节数字（新 `git=df96db7`）；`docs/17` §8.3 的旧表保留为
+D1 阶段留痕并标注「不可从 HEAD 复现」。`reports/` 为 gitignore 产物。
+
 
