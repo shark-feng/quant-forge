@@ -10,10 +10,51 @@
 
 ## [Unreleased]
 
+### 新增（第三轮 M4：DataProvider 取数层，M4-1~M4-10）
+
+- **取数抽象** `src/aqs/data/provider.py`：`ProviderCapabilities`（12 项能力显式声明 + `missing_required`
+  按需判定）、`Provenance`（溯源，时间戳统一带时区 UTC）、`ProviderHealth`、
+  `DataProvider` 协议 + **多标的取数约定**、`degradation_notes`、`filter_effective_window`（区间相交）。
+- **本地缓存** `cache.py`：Parquet 优先 / pyarrow 降级 CSV、参数哈希（**不含日期区间**）、
+  schema 版本隔离（旧版本不读也不删）、四态命中、增量合并（断言不丢数据）、manifest、原子写入。
+- **限流与重试** `ratelimit.py`：令牌桶（`clock`/`sleeper` 可注入）+ 指数退避重试
+  （`retry_on_empty` 默认关闭：空结果多半是停牌/退市，重试白耗配额）。
+- **数据质量** `quality.py`：Q1~Q12（含 Q3 手/股量级、Q12 幸存者偏差自检）+ 阈值可配 + 报告结构。
+- **三个本地实现**：`synthetic_provider.py`（声明全部日频能力）、`file_provider.py`
+  （CSV/Parquet，能力**由实际列推断**）、`akshare_provider.py`（映射骨架 + 快照累积状态，
+  **不联网**；接口名与列名是候选值，M5 探测后单点修改 `ENDPOINTS`/`MAPPERS`）。
+- **注册表** `registry.py`：`register_provider` / `build_provider` / `available_providers` /
+  `provider_capabilities`；未知名抛 `ConfigError` **不回退**，构建期做协议闸门。
+- **适配层** `loader.py::ingest_from_provider` + `IngestReport`：九步流程、`step_status`
+  （`ok|degraded|failed|skipped`，`skipped` 只表示「用户没请求」）、逐条口径披露、缓存清单、
+  `has_errors` / `overall_status`。
+- 契约测试 `tests/contracts/provider_contract.py` + `tests/test_provider_contract.py`：
+  **4 个 provider × 8 项检查 = 32 条**（能力声明↔行为一致 / `missing_required` 边界 /
+  降级披露自洽 / **成分窗口区间相交** / 字段规范 / 主键唯一 / PIT 列与区间 / `Provenance` 契约）。
+- 成文文档 `docs/14_provider_layer.md`：接口、能力矩阵、缓存/限流/降级策略、契约清单、与 `DataStore` 的边界。
+
+### 修复（测试基础设施：**不报错但结果失真**的一类问题）
+
+- **运行器收集不到继承的 `test_*` 方法**：`vars(Class)` 只含类自身 `__dict__`，
+  mixin 里的契约检查会被收集 0 条而 pytest 收集 32 条 —— 收集阶段不一致**不报错**，
+  只会让「看起来全绿」变成「实际没跑」。已改为 `inspect.getmembers(..., isfunction)`
+  （沿 MRO 查找、`@property` 不算方法），并加正反例守护与 pytest/unittest 等价性比对。
+- **「用例收集」存在三份实现且互相印证**：运行器 / `tools/sync_doc_counts.py` /
+  `test_defect_11_docs_consistency.py`（AST 计数）各自统计；其中两份**各自都错**，
+  于是文档数字少算 2 条而 4 条文档守护全绿。现统一为**唯一实现** `run_tests._iter_tests`，
+  并加「工具计数 == 运行器计数（含逐模块）」的等价守护。
+- **契约测试抓出的三处 provider 不一致**（都属「不报错但语义/记录悄悄不同」）：
+  ① `FileProvider.fetch_bars` 在「请求的标的全都不存在」时抛异常，违反多标的约定
+  （应为空表 + warning；与「源本身不可用」区分，后者仍报错）；
+  ② `fetch_index_members` 区间过滤为空时不给 warning；
+  ③ `fetch_trading_calendar` 的 `Provenance.rows` 沿用了行情行数而非交易日数（日历 `symbols` 也应为 0）。
+- **UTC 时间戳贯通**：`FileProvider.fetch_bars` 的增量路径曾因 `bars_hfq` 帧没有 `symbol` 列
+  而在合并时 `KeyError`（合并键硬编码）；`cache_hit` 语义原为「没发过网络请求」，
+  与「降级回退时 `cache_hit=True`」冲突，已改为「最终供给数据的是缓存」。
+
 ### 计划中
 
-- **M4** DataProvider 抽象（能力声明 / provenance / 健康检查）+ 契约测试
-- **M5** AKShare 适配层 + 数据质量检查 Q1~Q12 + 离线 fixture + 联网 runbook
+- **M5** AKShare 联网适配：`tools/probe_akshare.py` 探测后固化接口名与列名 + 真实抓取 + runbook
 - **M6** 评价层 `src/aqs/metrics/`（收益 / 风险 / 相对 / 交易 / 容量 / 暴露 / 归因 / 敏感性 / 分割 / 蒙特卡洛）
 - **M7** 报告层 `src/aqs/report/`（内嵌 SVG，不引入 matplotlib/plotly）
 - **M8** 偏差与压力测试套件（未来函数 / T+1 / 涨跌停 / 幸存者偏差 + 三段危机窗口）

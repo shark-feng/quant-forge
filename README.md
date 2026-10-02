@@ -59,7 +59,9 @@
 | [`docs/12_framework_matrix.md`](docs/12_framework_matrix.md) | 框架选型矩阵与主引擎边界 |
 | [`docs/12_appendix_verification.md`](docs/12_appendix_verification.md) | 框架选型待核实项 V1~V6 的可执行清单（宿主机联网执行） |
 | [`docs/13_metrics.md`](docs/13_metrics.md) | M6 评价层设计（指标口径 / 容量 / 归因） |
+| [`docs/14_provider_layer.md`](docs/14_provider_layer.md) | **M4 取数层成文**：DataProvider 抽象、四实现能力矩阵、缓存/限流/降级、契约测试与边界 |
 | [`docs/17_round3_diagnostics.md`](docs/17_round3_diagnostics.md) | 第三轮诊断报告（D1 口径 / D2 整手 / D3 字段语义 / D4 可复现性） |
+| [`docs/18_m4_dataprovider.md`](docs/18_m4_dataprovider.md) | M4 设计与决策记录（接口、能力、失败路径裁决） |
 | [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) | 开发方式合同（一模块一交付、验收门禁、报告与数字纪律） |
 | [`CHANGELOG.md`](CHANGELOG.md) | 更新日志（按轮次记录新增/修复/文档变更） |
 | [`NOTICE`](NOTICE) | 第三方署名、依赖清单、合规声明、待联网核实项 |

@@ -72,10 +72,10 @@
 | 里程碑 | 模块 | 文档 | 实现 | 测试 | 状态 |
 |---|---|---|---|---|---|
 | M1 | R2-01 缺陷修复 12 条 | ✅ `10_round2_design.md` §4 | ✅ | ✅ | **已交付**（12 条全部修复，110 条回归用例） |
-| M2 | R2-02 工程化 / GitHub | ✅ §8 | — | — | 待确认后开工 |
-| M3 | R2-03 框架选型矩阵 | ✅ `12_framework_matrix.md` | — | — | 待确认（含许可证核实项） |
-| M4 | R2-04 DataProvider 抽象 | ✅ `11_akshare_provider.md` | — | — | 待确认 |
-| M5 | R2-05 AKShare 适配 | ✅ `11_akshare_provider.md` | — | — | 待确认（在线验证由使用者执行） |
+| M2 | R2-02 工程化 / GitHub | ✅ §8 | ✅ 工程化文件全部就绪（README/NOTICE/CHANGELOG/LICENSE/`.gitignore`/`.gitattributes`/上传脚本） | — | **已交付**（推送由宿主机执行） |
+| M3 | R2-03 框架选型矩阵 | ✅ `12_framework_matrix.md` | — | — | ⏳ 待确认（含许可证与 V1~V6 核实项） |
+| M4 | R2-04 DataProvider 抽象 | ✅ `11_akshare_provider.md` + `18_m4_dataprovider.md` + `14_provider_layer.md` | ✅ M4-1~M4-10 | — | **已交付**（详见第三轮表） |
+| M5 | R2-05 AKShare 适配 | ✅ `11_akshare_provider.md` | ⏳ 仅映射骨架（M4-8） | — | ⏳ 待确认（**联网探测与真实抓取由使用者执行**） |
 | M6 | R2-06 M6 评价层 | ✅ `13_metrics.md` | — | — | 待确认 |
 | M7 | R2-07 M7 报告层 | ⏳ `14_report.md` | — | — | 待设计 |
 | M8 | R2-08 偏差与压力套件 | ⏳ `15_testing_suite.md` | — | — | 待设计 |
@@ -93,9 +93,10 @@
 | D4 | 缺陷 #14 结果不可复现 | ✅ `17_round3_diagnostics.md` §5 | ✅（1 行 + 跨进程守护） | ✅ 4 条 | **已交付** |
 | — | 缺陷 #16 运行溯源 | ✅ `17_round3_diagnostics.md` §8.3 | ✅ `core/provenance.py` | ✅ 11 条 | **已交付** |
 | — | 开工前确认 Q1~Q3 | ✅ `17_round3_diagnostics.md` §9 | ✅ `DROPPED` 已在终态集合（无需修复）；Q3 脚本三处修正 | ✅ +5 条守护 | **已交付** |
-| M2 | R2-02 工程化 / GitHub 同步 | ✅ README / NOTICE / CHANGELOG | ✅ 工程化文件全部就绪，已本地提交 `2c46504` | ✅ 20 条 | ⚠️ **推送未完成**（由宿主机执行，见下） |
+| M2 | R2-02 工程化 / GitHub 同步 | ✅ README / NOTICE / CHANGELOG | ✅ 工程化文件全部就绪 | ✅ `test_packaging.py` 23 条 | ⚠️ **推送由宿主机执行** |
 | M3 | R2-03 框架选型与边界纪律 | ✅ `12_framework_matrix.md` + `12_appendix_verification.md` | ✅ 见本文件 §7 | — | ⏳ **V1~V6 待宿主机联网执行** |
-| M4 | R2-04 DataProvider 抽象 | ✅ `11_akshare_provider.md` §3~§6 | — | — | 待开工（约 30 条） |
+| M4 | R2-04 DataProvider 抽象 | ✅ `18_m4_dataprovider.md` + **`14_provider_layer.md`（成文）** | ✅ M4-1~M4-10 全部交付（`102fb3e`…`905dae4`） | ✅ **157 条**（含 32 条四实现契约） | ✅ **已交付** |
+| M5 | R2-05 AKShare 联网适配 | ✅ `11_akshare_provider.md` | ⏳ 仅映射骨架（M4-8） | — | ⏳ **待开工**：真实抓取 + `tools/probe_akshare.py` 探测后固化接口名/列名 |
 | M5~M9 | 见第二轮里程碑表 | — | — | — | 待开工 |
 
 > ⚠️ **M2 推送说明**：本机开发环境**对外网络被隔离**（沙箱设计，非故障）。

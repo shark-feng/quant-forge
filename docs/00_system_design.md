@@ -95,7 +95,9 @@ D:\Quantify\
 │   ├── 12_framework_matrix.md       ✅ 框架选型矩阵与主引擎边界
 │   ├── 12_appendix_verification.md  ✅ 选型待核实项 V1~V6 可执行清单（联网执行）
 │   ├── 13_metrics.md                ✅ M6 评价层设计
+│   ├── 14_provider_layer.md         ✅ **M4 取数层成文**（接口/能力矩阵/缓存限流/契约/边界）
 │   ├── 17_round3_diagnostics.md     ✅ 第三轮诊断报告（D1~D4 + 实施结果）
+│   ├── 18_m4_dataprovider.md        ✅ M4 设计（接口 + 决策记录）
 │   ├── DEVELOPMENT.md               ✅ 开发方式合同（一模块一交付、验收门禁、报告纪律）
 │   └── RISK_DISCLAIMER.md           ✅ 风险与合规声明
 ├── data\                            ✅ 目录占位（raw/processed/index/fundamental）
@@ -114,12 +116,20 @@ D:\Quantify\
 │   ├── config\                      ✅ M0
 │   │   ├── schema.py                ✅ 配置 dataclass（强类型 + 校验）
 │   │   └── loader.py                ✅ YAML 加载/合并/覆写/环境变量
-│   ├── data\                        ✅ M1
-│   │   ├── schema.py                ✅ 列规范 + 校验 + 质量报告
-│   │   ├── loader.py                ✅ CSV/Parquet 读取 + 复权因子处理
+│   ├── data\                        ✅ M1 数据层 + M4 取数层（13 个模块）
+│   │   ├── schema.py                ✅ 列规范 + 校验 + 质量报告（canonical 契约）
+│   │   ├── loader.py                ✅ CSV/Parquet 读取 + normalize + **provider→store 适配**（`ingest_from_provider`）
 │   │   ├── store.py                 ✅ DataStore + PITView（禁未来函数）
 │   │   ├── universe.py              ✅ 股票池动态调整（ST/停牌/上市天数/流动性）
-│   │   └── synthetic.py             ✅ 确定性合成数据（测试/演示/压力场景）
+│   │   ├── synthetic.py             ✅ 确定性合成数据（测试/演示/压力场景）
+│   │   ├── provider.py              ✅ M4-2 取数抽象：能力声明/溯源/健康/协议/降级披露
+│   │   ├── cache.py                 ✅ M4-3 本地缓存（参数哈希/版本隔离/增量合并/清单/原子写）
+│   │   ├── ratelimit.py             ✅ M4-4 令牌桶限流 + 指数退避重试（时钟可注入）
+│   │   ├── quality.py               ✅ M4-5 数据质量检查 Q1~Q12 + 可落盘报告
+│   │   ├── synthetic_provider.py    ✅ M4-6 合成数据 provider
+│   │   ├── file_provider.py         ✅ M4-6 CSV/Parquet provider（能力由实际列推断）
+│   │   ├── akshare_provider.py      ✅ M4-8 AKShare 映射骨架 + 快照累积（离线；联网探测属 M5）
+│   │   └── registry.py              ✅ M4-7 注册表与配置驱动构建（未知名**不回退**）
 │   ├── engine\                      ✅ M2（本轮为骨架 + 撮合/成本完整实现）
 │   │   ├── cost.py                  ✅ 成本模型（佣金/印花税/过户费/滑点/冲击）
 │   │   ├── matching.py              ✅ 撮合规则（涨跌停/停牌/T+1/整手/参与率）
@@ -148,21 +158,23 @@ D:\Quantify\
 │   │   └── stats.py                 ✅ 拒单率/误杀率/触发延迟
 │   ├── metrics\                     ❌ M6
 │   └── report\                      ❌ M7
-├── tests\                           ✅ 单元测试
-│   ├── run_tests.py                 ✅ 零依赖测试运行器（pytest 缺失时兜底）
+├── tests\                           ✅ 52 个测试模块 / 772 个用例（零依赖运行器 + pytest 双兼容）
+│   ├── run_tests.py                 ✅ 零依赖运行器（**全仓唯一的用例收集实现**，支持 skip）
 │   ├── conftest.py                  ✅ pytest 夹具（合成市场/配置）
 │   ├── tools.py                     ✅ 测试数据构造工具
-│   ├── test_config.py               ✅
-│   ├── test_data_schema.py          ✅
-│   ├── test_calendar.py             ✅
-│   ├── test_data_store.py           ✅ 含未来函数测试
-│   ├── test_universe.py             ✅ 含幸存者偏差测试
-│   ├── test_events.py               ✅
-│   ├── test_cost.py                 ✅
-│   ├── test_matching.py             ✅ 含涨跌停/停牌/T+1/整手
-│   └── test_engine_backtest.py      ✅ 端到端 T+1 与事件顺序验收
-└── reports\                         ❌ 回测报告输出目录（M7 阶段生成）
+│   ├── compat.py                    ✅ pytest 兼容层（assert/raises/approx/skip）
+│   ├── contracts\
+│   │   └── provider_contract.py     ✅ M4-9 四 provider 共用契约（8 项 × 4 实现；自身不被收集）
+│   ├── fixtures\akshare\            ✅ M4-8 离线样例 + README（**手工构造，非真实抓取数据**）
+│   └── test_*.py                    ✅ 52 个（M1~M4 各层 + 19 条缺陷回归 + 工程化/编码/契约守护）
+└── tools\                           ✅ 维护脚本（文档数字同步、抓取探测、上传、诊断）
+    ├── sync_doc_counts.py           ✅ 文档数字同步（复用运行器收集逻辑；规则失配即报错）
+    ├── upload_github.ps1            ✅ 宿主机推送脚本（含密钥扫描与非交互保护）
+    └── diag_*.py                    ✅ 只读诊断（表格/订单时序/确定性/整手不变量）
 ```
+
+> `reports\`（回测产物，M7 阶段生成）与 `data\cache\`（取数缓存）已 gitignore，故不在树中列出。
+> M5 将新增 `tools\probe_akshare.py`（联网探测）与 `tools\fetch_data.py`（真实抓取）。
 
 ---
 
