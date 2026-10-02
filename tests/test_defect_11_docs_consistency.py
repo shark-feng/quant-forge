@@ -26,20 +26,19 @@ README = PROJECT_ROOT / "README.md"
 # 真值来源：代码
 # --------------------------------------------------------------------------- #
 def count_test_cases() -> tuple[int, int]:
-    """返回 (用例数, 模块数)，口径与 ``tests/run_tests.py`` 一致。"""
+    """返回 (用例数, 模块数)，口径 = **运行器实际会跑的用例数**。
+
+    这里曾经用 AST 静态统计（只数类自身 body 的方法），在运行器改为「包含继承方法」后
+    与真实收集数相差 34 条 —— 而 docstring 却声称「口径与 run_tests.py 一致」。
+    三份独立实现（运行器 / `tools/sync_doc_counts.py` / 本文件）各自统计正是漂移之源，
+    故统一为**调用运行器的收集逻辑**：文档里的数字就该等于会执行的用例数。
+    """
+    from tests import run_tests as runner
+
     modules = sorted((PROJECT_ROOT / "tests").glob("test_*.py"))
     cases = 0
     for path in modules:
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in tree.body:
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_"):
-                cases += 1
-            elif isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
-                cases += sum(
-                    1
-                    for item in node.body
-                    if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name.startswith("test_")
-                )
+        cases += sum(1 for _ in runner._iter_tests(runner._load_module(path)))
     return cases, len(modules)
 
 

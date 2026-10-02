@@ -208,9 +208,10 @@ class SyntheticProvider:
         bundle = self._bundle()
         frame = self._slice(bundle.bars, start, end)
         days = sorted({pd.Timestamp(d).date() for d in pd.to_datetime(frame["date"])})
+        # `rows` 描述**返回的数据**（日期列表）；日历本身不含标的，故 symbols=0
         prov = Provenance(
             source="synthetic", fetched_at=utc_now(), cache_hit=False,
-            rows=len(days), symbols=1,
+            rows=len(days), symbols=0,
         )
         return days, prov
 

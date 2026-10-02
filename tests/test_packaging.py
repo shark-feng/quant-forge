@@ -300,6 +300,47 @@ def test_doc_count_sync_tool_rules_all_match():
     assert mod.MODULE_ROW.search(doc03), "docs/03 分模块表行正则已失配"
 
 
+def test_doc_count_tool_uses_the_same_collection_as_the_runner():
+    """文档同步工具的用例数必须与运行器**逐模块完全一致**。
+
+    该工具曾自己实现一份收集逻辑（`vars(obj)`，不含继承方法），在运行器改为
+    「包含继承方法」后与真实值差了 34 条 —— 而且**不报错**，只是把过期数字写进文档。
+    单一实现（复用 `run_tests._iter_tests`）+ 本守护是唯一可靠做法。
+    """
+    import importlib.util
+    import sys
+
+    from tests import run_tests as runner
+
+    tool_path = PROJECT_ROOT / "tools" / "sync_doc_counts.py"
+    spec = importlib.util.spec_from_file_location("_sync_doc_counts_counts", tool_path)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["_sync_doc_counts_counts"] = mod
+    spec.loader.exec_module(mod)
+
+    total, modules, per_module = mod.collect_counts()
+
+    expected_total = 0
+    expected_modules = 0
+    for path in sorted((PROJECT_ROOT / "tests").glob("test_*.py")):
+        expected_modules += 1
+        expected_total += sum(1 for _ in runner._iter_tests(runner._load_module(path)))
+
+    assert modules == expected_modules, f"模块数不一致：工具 {modules} / 运行器 {expected_modules}"
+    assert total == expected_total, f"用例总数不一致：工具 {total} / 运行器 {expected_total}"
+    assert len(per_module) == modules and sum(per_module.values()) == total
+    # 逐模块也要一致（总数相同但分布不同同样是漂移）
+    per_module_expected = {
+        path.name: sum(1 for _ in runner._iter_tests(runner._load_module(path)))
+        for path in sorted((PROJECT_ROOT / "tests").glob("test_*.py"))
+    }
+    assert per_module == per_module_expected, (
+        "逐模块用例数与运行器不一致："
+        f"{ {k: (per_module.get(k), v) for k, v in per_module_expected.items() if per_module.get(k) != v} }"
+    )
+
+
 def test_public_package_exports_are_complete_and_unambiguous():
     """`aqs.data` / `aqs` 的公开导出必须「写了就存在、不重复、不漏关键入口」。
 

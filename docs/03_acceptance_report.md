@@ -13,9 +13,9 @@
 | 项目 | 结果 |
 | --- | --- |
 | 测试运行方式 | `python tests/run_tests.py`（零依赖运行器，与 pytest 双兼容） |
-| 用例总数 | **720** |
-| 本机实测结果 | 通过 715 / **跳过 1** / 失败 0（跳过项为环境门控，见下） |
-| 测试模块 | 50 个 |
+| 用例总数 | **757** |
+| 本机实测结果 | 通过 756 / **跳过 1** / 失败 0（跳过项为环境门控，见下） |
+| 测试模块 | 51 个 |
 | 代码规模 | `src/aqs` 46 个文件约 9.0k 行；`tests` 41 个文件约 6.5k 行 |
 
 > **关于 skip（不要读成通过）**：少数用例是**环境门控**的 —— 例如
@@ -61,7 +61,7 @@
 | `test_defect_07_risk_stats_schema.py` | 8 | **回归 #7** stats 口径一致性 |
 | `test_defect_08_listing_date.py` | 11 | **回归 #8** 上市日不得静默兜底 |
 | `test_defect_09_volume_ratio_guard.py` | 13 | **回归 #9** 量比基准阈值 |
-| `test_defect_10_test_hygiene.py` | 10 | **回归 #10** 测试代码坏味道（AST 守护）+ **收集规则一致性守护**（运行器 ↔ pytest 规则 ↔ unittest 加载器；含继承方法、`@property`、非 `Test*` 类的正反例） |
+| `test_defect_10_test_hygiene.py` | 12 | **回归 #10** 测试代码坏味道（AST 守护）+ **收集规则一致性守护**（运行器 ↔ pytest 规则 ↔ unittest 加载器；含继承方法、`@property`、非 `Test*` 类的正反例） |
 | `test_defect_12_demo_scope.py` | 12 | **回归 #12** 数据口径四元组与 CLI |
 | `test_defect_11_docs_consistency.py` | 12 | **回归 #11** 文档与代码一致性（AST/正则守护；含 docs/00 与 CHANGELOG 数字守护、选型待核实项附录指引） |
 | `test_defect_15_order_field_semantics.py` | 8 | **回归 #15** 订单字段语义（final_status / last_reject_reason / 顺延历史） |
@@ -69,15 +69,16 @@
 | `test_defect_16_provenance.py` | 11 | **回归 #16** 运行溯源（命令/Git/哈希种子写入 summary.json）+ 文档数字一致性 |
 | `test_determinism.py` | 4 | **回归 #14** 跨进程可复现（两个 PYTHONHASHSEED 下数据与回测完全一致） |
 | `test_no_mojibake.py` | 9 | 编码守护（UTF-8 可解码 / 无 U+FFFD / 无乱码特征串），把 PowerShell 教训变成红灯 |
-| `test_packaging.py` | 22 | **M2 工程化**：许可证一致、依赖分组一致、`.gitignore`/`.gitattributes` 覆盖度、**禁止第三方回测框架进依赖**、上传脚本健壮性、README 链接与 AKShare runbook |
+| `test_packaging.py` | 23 | **M2 工程化**：许可证一致、依赖分组一致、`.gitignore`/`.gitattributes` 覆盖度、**禁止第三方回测框架进依赖**、上传脚本健壮性、README 链接与 AKShare runbook |
 | `test_provider_config.py` | 7 | **M4-1** 取数行为配置：缓存/限流/重试/单位换算的默认值、`base.yaml` 携带、非法值报错、overlay 可达 |
 | `test_provider_abstraction.py` | 8 | **M4-2** 数据源抽象：能力**显式声明**与缺失判定、溯源结构、降级披露文本、协议可判定 |
 | `test_data_cache.py` | 14 | **M4-3** 本地缓存：参数哈希（**不含日期区间**）、schema 版本隔离、TTL 四态判定、增量合并**不丢数据**、manifest、原子写入、key 越界防护 |
 | `test_ratelimit.py` | 15 | **M4-4** 限流与重试：令牌桶（时钟/睡眠可注入）、指数退避+抖动、**空结果默认不重试**、不可重试异常直抛 |
 | `test_data_quality.py` | 20 | **M4-5** 质量检查 Q1~Q12（含 **Q3 手/股量级**、**Q12 幸存者偏差自检**）、阈值可配、报告结构与退出码、纯函数不改输入 |
-| `test_provider_implementations.py` | 8 | **M4-6** synthetic/CSV/Parquet 三实现：能力**由实际列推断**、指数成分**区间相交**过滤（正反例）、pyarrow 环境门控 |
+| `test_provider_implementations.py` | 10 | **M4-6** synthetic/CSV/Parquet 三实现：能力**由实际列推断**、指数成分**区间相交**过滤（正反例）、**「未知标的→空表+warning」与「源不可用→仍报错」的区分**、pyarrow 环境门控 |
 | `test_provider_registry.py` | 13 | **M4-7** 注册表：未知名报错**不回退**、重名需显式 overwrite、构建期协议闸门、配置层与运行层分工、能力查询 strict/degraded、root 解析口径 |
 | `test_akshare_provider.py` | 23 | **M4-8** AKShare 映射骨架（全离线）：**手→股**单位换算、代码归一与非法值报错、复权因子归一（缺失不猜测）、上市日缺失报错、公告日缺失丢行、**快照累积区间闭合/同日幂等**、缓存命中不发请求 / 增量收窄 / 降级回退、重试与失败比例升级、进度审计、能力如实声明（`index_members=False`） |
+| `test_provider_contract.py` | 32 | **M4-9 契约**：4 个 provider × 8 项检查（能力声明↔实际行为 / `missing_required` 边界 / 降级披露自洽 / **成分窗口区间相交** / 字段规范 / 主键唯一 / PIT 列与区间 / `Provenance` 契约）；检查项定义在 mixin 里由子类继承，**由运行器统一收集** |
 
 ---
 
@@ -343,5 +344,5 @@ volume `{filled:211, no_quote:66}`（volume 的 11 笔 `expired` 来自 `no_quot
 | 缺陷 #16 报告数字可追溯 | 已修复（`summary.json. diagnostics.invocation`） |
 | D1 口径更正 | `docs/03` §9 重写：口径定义 + 更正记录 + 重新生成后的真实数字 |
 | M2 工程化 | 文件全部交付并本地提交 `2c46504`；**推送待联网环境** |
-| 测试 | **收集 720 个用例**（50 个模块；第一轮 398 → 本轮 720） |
+| 测试 | **收集 757 个用例**（51 个模块；第一轮 398 → 本轮 757） |
 | 新增机械守护 | 整手不变量 / 跨进程确定性 / 乱码编码 / 工程化一致性 / 文档数字一致性 |

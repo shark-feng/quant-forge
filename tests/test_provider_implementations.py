@@ -19,6 +19,7 @@ from aqs.core.exceptions import DataError
 from aqs.data.cache import parquet_available
 from aqs.data.file_provider import CsvProvider, ParquetProvider
 from aqs.data.provider import DataProvider
+from aqs.data.schema import BARS_COLUMNS
 from aqs.data.synthetic_provider import SyntheticProvider
 
 START = "2022-01-04"
@@ -252,6 +253,37 @@ def test_csv_provider_health_check_reports_missing_directory():
         assert health.errors
         caps = provider.capabilities()
         assert caps.daily_bars is False, "探测失败时能力必须按最低估计"
+
+
+def test_csv_provider_unknown_symbols_return_empty_with_warning():
+    """多标的取数约定第 1 条：请求的标的都不存在 → **空表 + warning**，不抛异常。
+
+    这与「数据源不可用」必须区分：前者是调用方给的标的没有数据（可继续），
+    后者是配置/文件问题（必须报错）。
+    """
+    with workspace_tmp("provider_csv_unknown") as root:
+        write_csv_dataset(root, with_optional=False)
+        provider = CsvProvider(root, config=DataConfig(provider="csv"))
+        empty, prov = provider.fetch_bars(["999999.SZ"], START, END)
+
+    assert len(empty) == 0
+    assert set(empty.columns) == set(BARS_COLUMNS), "空表也要给出 canonical 列，便于下游统一处理"
+    assert prov.warnings and "没有行情" in prov.warnings[0]
+    assert prov.rows == 0 and prov.symbols == 0
+
+
+def test_csv_provider_unusable_source_still_raises():
+    """反例：源本身不可用（目录缺失 / 目录里没有数据文件）必须抛错，不得静默返回空表。"""
+    with workspace_tmp("provider_csv_unusable") as root:
+        missing_dir = CsvProvider(root / "nope", config=DataConfig(provider="csv"))
+        with raises(DataError):
+            missing_dir.fetch_bars(["600000.SH"], START, END)
+
+        empty_dir = root / "empty"
+        empty_dir.mkdir()
+        no_files = CsvProvider(empty_dir, config=DataConfig(provider="csv"))
+        with raises(DataError):
+            no_files.fetch_bars(["600000.SH"], START, END)
 
 
 # --------------------------------------------------------------------------- #

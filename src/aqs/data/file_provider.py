@@ -33,6 +33,7 @@ from .provider import (
     filter_effective_window,
     utc_now,
 )
+from .schema import BARS_COLUMNS
 
 __all__ = ["FileProvider", "CsvProvider", "ParquetProvider"]
 
@@ -190,6 +191,15 @@ class FileProvider:
     def _empty(columns: Sequence[str]) -> pd.DataFrame:
         return pd.DataFrame(columns=list(columns))
 
+    def _source_exists(self) -> bool:
+        """数据源本身是否存在（用于区分「请求没匹配到」与「源不可用」）。"""
+        root = self.root
+        if root.is_file():
+            return True
+        if not root.exists():
+            return False
+        return any(p.is_file() for p in root.iterdir())
+
     # ------------------------------------------------------------------ #
     # 协议实现
     # ------------------------------------------------------------------ #
@@ -202,7 +212,16 @@ class FileProvider:
         adjust: str = "none",
     ) -> tuple[pd.DataFrame, Provenance]:
         _ = adjust
-        frame = self.loader.load_bars(symbols=symbols, start=start, end=end)
+        try:
+            frame = self.loader.load_bars(symbols=symbols, start=start, end=end)
+        except DataError as exc:
+            # 两种情况必须分开（多标的取数约定第 1 条）：
+            # - 明确请求了标的、但本地都没有行情 → **空表 + warning**，不抛异常；
+            # - 数据源本身不可用（目录/文件缺失）→ 仍然抛：那是配置问题，不该被静默降级。
+            if not symbols or not self._source_exists():
+                raise
+            empty = self._empty(BARS_COLUMNS)
+            return empty, self._prov(empty, (f"请求的标的在本地数据中没有行情：{exc}",))
         warnings: tuple[str, ...] = ()
         wanted = {str(s).upper() for s in symbols} if symbols else set()
         if wanted:
@@ -242,7 +261,12 @@ class FileProvider:
             return empty, self._prov(empty, (f"指数 {index_code} 无成分记录",))
         # 区间相交语义：窗口开始前就生效的成分**必须保留**，否则股票池会退化为全市场
         frame = filter_effective_window(frame, start, end)
-        return frame.copy(), self._prov(frame)
+        warnings: tuple[str, ...] = ()
+        if len(frame) == 0:
+            # 空结果必须**显式披露**（与 synthetic/akshare 一致）：否则调用方只看到空表，
+            # 无法区分「该区间确实没有成分」与「读文件失败」
+            warnings = (f"指数 {index_code} 在 [{start}, {end}] 无生效的成分记录",)
+        return frame.copy(), self._prov(frame, warnings)
 
     def fetch_fundamentals(
         self, symbols: Sequence[str], start: DateLike, end: DateLike
@@ -269,7 +293,15 @@ class FileProvider:
     ) -> tuple[list[Any], Provenance]:
         frame = self.loader.load_bars(start=start, end=end)
         days = sorted({pd.Timestamp(d).date() for d in pd.to_datetime(frame["date"], errors="coerce").dropna()})
-        return days, self._prov(frame)
+        # `Provenance.rows` 必须描述**返回的数据**（交易日历是日期列表，不是行情行数）
+        prov = Provenance(
+            source=self.name,
+            fetched_at=utc_now(),
+            cache_hit=False,
+            rows=len(days),
+            symbols=0,
+        )
+        return days, prov
 
     def fetch_industry(self, symbols: Sequence[str]) -> tuple[pd.DataFrame, Provenance]:
         if self._industry_cache is None:

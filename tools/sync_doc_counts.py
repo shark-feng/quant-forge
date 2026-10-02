@@ -23,8 +23,6 @@
 from __future__ import annotations
 
 import argparse
-import importlib.util
-import inspect
 import re
 import sys
 from pathlib import Path
@@ -35,37 +33,32 @@ TESTS = ROOT / "tests"
 
 
 # --------------------------------------------------------------------------- #
-# 1. 统计真实用例数（与 tests/run_tests.py 的收集规则保持一致）
+# 1. 统计真实用例数（**复用运行器的收集逻辑**，不再自己实现一份）
 # --------------------------------------------------------------------------- #
 def collect_counts() -> tuple[int, int, dict[str, int]]:
-    """返回 ``(用例总数, 模块数, {模块文件名: 用例数})``。"""
+    """返回 ``(用例总数, 模块数, {模块文件名: 用例数})``。
+
+    收集逻辑**直接调用** `tests/run_tests.py::_iter_tests`，不在此处复制一份 ——
+    本工具曾自己实现收集（用 `vars(obj)` 遍历类自身 __dict__），在运行器改为
+    「包含继承方法」后与真实收集数差了 34 条，而且**不报错**，只是把过期的数字写进文档。
+    单一实现 + `tests/test_defect_11_docs_consistency.py` 的等价性守护是唯一可靠做法。
+    """
+    for extra in (ROOT / "src", ROOT, TESTS):
+        if str(extra) not in sys.path:
+            sys.path.insert(0, str(extra))
+    from tests import run_tests as runner  # 延迟导入：先补齐 sys.path
+
     per_module: dict[str, int] = {}
     modules = 0
     for path in sorted(TESTS.glob("test_*.py")):
         modules += 1
-        spec = importlib.util.spec_from_file_location(path.stem, path)
-        if spec is None or spec.loader is None:  # pragma: no cover - 理论不可达
-            per_module[path.name] = 0
-            continue
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[path.stem] = module
         try:
-            spec.loader.exec_module(module)
+            module = runner._load_module(path)
         except Exception as exc:  # noqa: BLE001
             print(f"  !! 模块导入失败（用例数记为 0）：{path.name}: {exc}")
             per_module[path.name] = 0
             continue
-        count = 0
-        for name, obj in vars(module).items():
-            if name.startswith("test_") and inspect.isfunction(obj):
-                count += 1
-            elif name.startswith("Test") and inspect.isclass(obj):
-                count += sum(
-                    1
-                    for m_name, m in vars(obj).items()
-                    if m_name.startswith("test_") and inspect.isfunction(m)
-                )
-        per_module[path.name] = count
+        per_module[path.name] = sum(1 for _ in runner._iter_tests(module))
     return sum(per_module.values()), modules, per_module
 
 
