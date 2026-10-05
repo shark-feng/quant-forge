@@ -13,16 +13,29 @@
 | 项目 | 结果 |
 | --- | --- |
 | 测试运行方式 | `python tests/run_tests.py`（零依赖运行器，与 pytest 双兼容） |
-| 用例总数 | **799** |
-| 本机实测结果 | 通过 781 / **跳过 2** / 失败 0（跳过项为环境门控 + 一条刻意探针；两套运行器实测一致，见 `docs/17` §10） |
+| 用例总数 | **802** |
+| 本机实测结果 | 通过 **800** / 跳过 **2** / 失败 0（pytest 侧 `800 passed, 2 skipped`，逐项一致） |
 | 测试模块 | 55 个 |
 | 代码规模 | `src/aqs` 46 个文件约 9.0k 行；`tests` 41 个文件约 6.5k 行 |
 
-> **关于 skip（不要读成通过）**：少数用例是**环境门控**的 —— 例如
-> `test_parquet_provider_requires_pyarrow_with_actionable_error` 验证的是
-> 「未装 pyarrow 时应报错并提示安装」，在本机已装 pyarrow 的前提下无法成立。
-> 运行器把跳过项**单独计数并列出原因**；上表的「用例总数」是**收集数**，与是否跳过无关，
-> 因此不随机器变化（这也是文档数字守护能稳定比对的原因）。
+> **实测口径**：上表数字来自本机实际执行 `python tests/run_tests.py`（本机**已装 pyarrow**）
+> 与 `python -m pytest`；两套运行器的收集数与执行结果逐项一致（见 `docs/17` §10）。
+> 「用例总数」是**收集数**（与是否跳过无关，故不随机器变化）；
+> **通过数依赖本机是否装了可选依赖，因此不纳入 `tools/sync_doc_counts.py` 的自动同步** ——
+> 换机器后必须重新实测并连同命令一起更新，不得沿用旧数字。
+> 该行必须在同步工具运行后复核：`用例总数` 单元格只放 `**数字**`（工具锚定整格重写，
+> 加括号说明会被下一次同步抹掉，且会让锚定正则失配）。
+
+> **关于 skip（不要读成通过）**：当前**只有 2 条**，且**都是预期内**，不是回归。
+> 逐条来源如下（下一轮如出现第 3 条，必须在此表登记，否则视为回归信号）：
+>
+> | # | 用例 | 跳过原因 | 何时会执行 |
+> | --- | --- | --- | --- |
+> | 1 | `test_provider_implementations::test_parquet_provider_requires_pyarrow_with_actionable_error` | **环境门控**：该用例验证的是「**未装** pyarrow 时 `ParquetProvider` 应报错并提示安装」，本机已装 pyarrow，负路径不成立 | 只在**未装** pyarrow 的环境执行；pyarrow 可用的正向路径由 `test_parquet_provider_contract_round_trip` 与 `test_data_cache` 覆盖 |
+> | 2 | `test_skip_semantics::test_compat_skip_is_reported_as_skipped` | **刻意探针**（V4 纪律）：验证 `compat.skip` 在零依赖运行器与 pytest 两侧都被计为 skip 而非通过（回归目标见 `docs/DEVELOPMENT.md` §3 第四条禁令） | **永不执行**（设计如此：它验证的是「跳过」这一机制本身） |
+>
+> 运行器把跳过项**单独计数并列出原因**；「用例总数」是收集数，因此不随机器变化
+> （这也是文档数字守护能稳定比对的原因）。
 
 分模块用例数：
 
@@ -82,7 +95,7 @@
 | `test_ingest.py` | 15 | **M4-10 适配层**：九步流程与 `step_status` 取值域、`skipped` 仅表示「用户没请求」、可选数据失败**不中止**（`fallback`→degraded / `fail`→failed）、必需步骤失败中止并带步态、上市日策略 strict/proxy 两态、成分缺失的 fallback 开/关两态、**校验错误影响步态 + `has_errors`**、近似披露进 diagnostics 与 quality、D4 口径逐条披露、manifest 空值有解释、**与旧入口 `load_market_data` 的内部状态一致** |
 | `test_synthetic_parameters.py` | 8 | **V2 参数路径**：合成数据的标的属性/价格路径/财务数据都按**标的序号**取随机流（截断标的数或改变顺序都不改变已有标的的序列），并守住空标的与重复标的必须报错 |
 | `test_skip_semantics.py` | 1 | **V4 纪律探针**：一个**故意跳过**的用例，用于在两种运行器下都验证「`compat.skip` 计为 skip 而非通过」（子进程守护见 `test_defect_10_*`） |
-| `test_probe_akshare.py` | 15 | **M5-1** AKShare 端点探测工具（全离线 dry-run）：单位量级判定（手/元 正例、股/元 反例、缺列→未知且禁止上线）、**公告日缺失即「M6 的 PIT 因子做不了」**、`mapper_check` 只读（不改入参/不发请求/不写盘）、观测能力与建议由证据推导、单端点失败不中止、**akshare 缺失 → 全 not_found + 退出码 2 + 说明原因**、状态词表与分页签名分析、CLI 与 GBK 控制台可打印、md/json 状态一致、**探测与 provider 的调用参数逐条一致** |
+| `test_probe_akshare.py` | 18 | **M5-1** AKShare 端点探测工具（全离线 dry-run）：单位量级判定（手/元 正例、股/元 反例、缺列→未知且禁止上线）、**公告日缺失即「M6 的 PIT 因子做不了」**、`mapper_check` 只读（入参深比较 + 禁止 `open`）、观测能力与建议由证据推导、单端点失败不中止、**akshare 缺失 → 全 not_found + 退出码 2 + 说明原因**、状态词表与分页签名分析、CLI 与 GBK 控制台可打印、md/json 状态一致、**探测与 provider 的调用参数逐条一致**、**`--fixture-root` 在 live 模式被拒且拒绝发生在任何调用之前**、**`--end`/`--report-period` 的解析口径与来源标注**（≤ end 的最近**已过**季末） |
 
 ---
 
@@ -370,7 +383,7 @@ volume `{industry_exposure:26, max_position_per_symbol:18}`。
 | M2 工程化 | 文件全部交付；**推送由宿主机执行** |
 | **M4 取数层** | **M4-1~M4-10 全部交付**（`102fb3e`…`905dae4`）：抽象 / 缓存 / 限流 / 质量 / 三实现 + AKShare 骨架 / 注册表 / 适配层；成文见 `docs/14_provider_layer.md` |
 | **M4 契约测试** | **4 provider × 8 项 = 32 条**（含区间相交的正反例） |
-| 测试 | **收集 799 个用例**（55 个模块；第一轮 398 → 本轮 799） |
+| 测试 | **收集 802 个用例**（55 个模块；第一轮 398 → 本轮 802） |
 | 新增机械守护 | 整手不变量 / 跨进程确定性 / 乱码编码 / 工程化一致性 / 文档数字一致性 / **收集规则一致性（运行器↔pytest↔unittest）** |
 
 ### 11.1 「不报错、只让结果悄悄失真」类缺陷清单（按三种类型归类）

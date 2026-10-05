@@ -31,11 +31,29 @@
 - **单一实现**：`akshare_provider._client_kwargs` 提升为模块级公开函数 `client_kwargs_for`
   （provider 与探测共用同一份参数构造），并加交叉用例断言「探测发出的每一次调用，
   provider 也以**完全相同**的参数发出」——dry-run 正是靠它抓出「拿股票代码查指数成分」的静默空返回。
-- **格式即契约**：`docs/data/probe_report.schema.json`（JSON Schema）+ 15 条离线用例
+- **格式即契约**：`docs/data/probe_report.schema.json`（JSON Schema）+ 离线用例
   `tests/test_probe_akshare.py`，含轻量校验器（**不引入 jsonschema 依赖**）。
 - 顺带把三处「不报错的文档漂移」纳入机械守护：docs/03 分模块表漏登记 3 个模块
   （`test_synthetic_parameters` / `test_skip_semantics` / `test_probe_akshare`）、
   `docs/00` 目录树的模块数停在 M4、`--help` 文案含 GBK 编不出的字符会让 argparse 崩溃。
+
+### 加固（M5-1 验收反馈：3 条 push back + 2 条口径明确）
+
+- **README 的 `--out` 是目录不是文件**（单独提交 `72574e5`）：原写法
+  `--out reports\_probe\akshare_capabilities.json` 会创建一个叫 `...json` 的目录且**不报错**，
+  用户会以为探测成功；同句「速率限制表现」也与实际不符（探测测不到对端限流，测的是耗时中位数）。
+- **skip 逐条登记**：docs/03 §1 新增「当前 2 条跳过各自来源」表（1 条 pyarrow 环境门控 +
+  1 条 `test_skip_semantics` 刻意探针），并把 README 里复述的通过/总数改为**指向该表** ——
+  同一组数字在两处各自漂移正是老毛病；同时修掉 README 里停在 781/783 的旧值。
+- **`--fixture-root` 在 live 模式必须立刻拒绝**（新增用例）：断言退出码 2、错误信息点明
+  「只能与 `--dry-run` 同用」、**且拒绝发生在任何调用与任何落盘之前** ——
+  静默忽略会让用户以为在用 fixture 试跑，实际在真实抓取（花配额、污染缓存）。
+- **日期口径可复现**：`context` 新增 `end_source` / `report_period_source` /
+  `report_period_reason`，报告页首打印**解析后的绝对日期**与来源（`--end` 可省略，
+  但报告里记下的日期必须可复查）；`latest_quarter_end` 明确取「≤ end 的最近**已过**季末」
+  （`2022-03-15 → 2021-12-31`，**不是** `2022-03-31`）—— 未到季末的报告期会让 fundamentals
+  返回空表，进而被误读成「接口不可用」。
+- 用例 15 → 18 条（新增 fixture-root 拒绝、季末边界、日期来源三条）。
 
 ### 修复（同 API 不同参数路径产出不同内在状态：`generate_market_data`）
 
@@ -180,12 +198,12 @@
 
 ### 测试
 
-- 用例数 **398 → 799**（0.1.0 轮次新增 401 条）。按模块点算的构成：
+- 用例数 **398 → 802**（0.1.0 轮次新增 404 条）。按模块点算的构成：
   - 缺陷回归：#13 整手不变量 31 条、#14 跨进程确定性 4 条、#15 字段语义 8 条、#16 运行溯源 11 条；
   - 工程化与文档守护：`test_packaging.py` 20 条、`test_no_mojibake.py` 8 条、
     `test_defect_11_docs_consistency.py` 12 条（含 docs/00、CHANGELOG 数字守护与选型附录指引）；
   - 其余为第二轮缺陷回归（#1~#12）与既有模块用例。
-- 测试：收集 **799** 个用例（55 个测试模块）；环境门控用例以 skip 列出，不计入通过。
+- 测试：收集 **802** 个用例（55 个测试模块）；环境门控用例以 skip 列出，不计入通过。
   M4 阶段新增：配置 7、抽象 8、缓存 14、限流 15、质量 20、provider 实现 8（含 1 条环境门控）。
 
 > 第三轮续接的 5 条新增用例（Q1 的 DROPPED 终态守护 3 条、Q3 上传脚本健壮性 1 条、

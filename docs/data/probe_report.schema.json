@@ -42,13 +42,26 @@
     "out": { "type": "string", "minLength": 1 },
     "context": {
       "type": "object",
-      "required": ["symbols", "index_code", "window", "report_period", "timeout_seconds", "repeats"],
+      "required": [
+        "symbols",
+        "index_code",
+        "window",
+        "end_source",
+        "report_period",
+        "report_period_source",
+        "report_period_reason",
+        "timeout_seconds",
+        "repeats"
+      ],
       "additionalProperties": false,
       "properties": {
         "symbols": { "type": "array", "minItems": 1, "items": { "type": "string" } },
         "index_code": { "type": "string", "minLength": 1 },
         "window": { "type": "array", "minItems": 2, "items": { "type": "string" } },
+        "end_source": { "type": "string", "minLength": 1 },
         "report_period": { "type": "string", "minLength": 1 },
+        "report_period_source": { "type": "string", "minLength": 1 },
+        "report_period_reason": { "type": "string", "minLength": 1 },
         "timeout_seconds": { "type": "number", "minimum": 0 },
         "repeats": { "type": "integer", "minimum": 1 }
       }

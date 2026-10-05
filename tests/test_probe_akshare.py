@@ -471,9 +471,88 @@ def test_cli_arguments_and_help_and_fixture_root_guard():
     # 直接抛 UnicodeEncodeError —— 本用例初版就是这样红起来的。
     probe.build_parser().format_help().encode("gbk")
 
-    with raises(SystemExit) as info2:
-        probe.main(["--fixture-root", "fx"])  # 只能与 --dry-run 同用
-    assert info2.value.code == 2
+
+def test_fixture_root_in_live_mode_is_rejected_before_any_call():
+    """footgun 防护：`--fixture-root` 在 **live 模式**必须**立刻报错退出**，不得静默忽略。
+
+    静默忽略的后果特别隐蔽：用户以为在用 fixture 试跑，实际在**真实抓取**（花配额、
+    动本地缓存，还可能把半截数据写进缓存）。所以这里不只看退出码，还要证明
+    「拒绝发生在任何调用与任何落盘之前」。
+    """
+    import contextlib
+    import io
+
+    probe = load_probe_module()
+    client = FakeAKShareClient()
+    with workspace_tmp("probe_fixture_guard") as tmp:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with raises(SystemExit) as info:
+                # 没有 --dry-run ⇒ live 模式
+                probe.main(
+                    ["--out", str(tmp), "--fixture-root", str(FIXTURES), "--end", PROBE_END],
+                    client=client,
+                )
+        assert info.value.code == 2, "argparse 的用法错误必须以退出码 2 结束"
+        assert "--dry-run" in stderr.getvalue(), "错误信息必须点明它只能与 --dry-run 同用"
+        assert client.calls == [], "被拒绝时不得发出任何调用（否则就真的在抓数据）"
+        assert not list(tmp.iterdir()), "被拒绝时不得写出任何报告"
+
+        # 正向对照：同样传 --fixture-root，但带上 --dry-run 就能正常跑
+        code, out_dir = run_dry(tmp, probe, "--fixture-root", str(FIXTURES))
+        assert code == 0
+        report, _ = read_report(out_dir)
+        assert report["mode"] == "dry-run" and report["client"] == "FakeAKShareClient"
+
+
+# --------------------------------------------------------------------------- #
+# 12b：日期口径（`--end` / `--report-period` 的解析与来源）
+# --------------------------------------------------------------------------- #
+def test_latest_quarter_end_semantics():
+    """`report_period` 的默认口径：≤ end 的**最近已过**季末（不是当季未到的季末）。
+
+    取「当季未到的季末」会让 fundamentals 接口返回空表 —— 使用者会把「参数不对」
+    误读成「接口不可用」，这是探测工具最不能给的假结论。
+    """
+    probe = load_probe_module()
+    cases = {
+        "2022-03-15": "2021-12-31",  # 当季未到季末 → 取上一季（明确 2 的结论）
+        "2022-03-31": "2022-03-31",  # 当天就是季末 → 取它自己
+        "2022-01-01": "2021-12-31",
+        "2022-04-01": "2022-03-31",
+        "2022-12-31": "2022-12-31",
+        "2023-01-02": "2022-12-31",
+    }
+    for day, expected in cases.items():
+        actual = str(probe.latest_quarter_end(day).date())
+        assert actual == expected, f"{day} 的报告期应为 {expected}，实际 {actual}"
+
+
+def test_context_records_resolved_dates_and_sources():
+    """命令里的 `--end` 可以省略，但**报告里的日期必须可复现**，且要能看出是推导还是显式指定。"""
+    probe = load_probe_module()
+
+    derived = probe.make_context(end=PROBE_END).as_dict()
+    assert derived["window"][1] == PROBE_END, "报告必须写解析后的绝对结束日期"
+    assert derived["end_source"] == "cli(--end)"
+    assert derived["report_period"] == "2021-12-31"
+    assert derived["report_period_source"] == "derived(最近已过季末)"
+    assert "未公布" in derived["report_period_reason"], "必须写明为什么这么取报告期"
+
+    explicit = probe.make_context(end="2022-03-15", report_period="20211231").as_dict()
+    assert explicit["report_period_source"] == "cli(--report-period)"
+    assert "显式指定" in explicit["report_period_reason"]
+
+    # 不传 --end：end 落到「今天（UTC）」，来源必须如实标注（默认值不可复现，
+    # 但报告里记下的日期是可复现的）
+    with workspace_tmp("probe_default_end") as tmp:
+        code = probe.main(["--dry-run", "--out", str(tmp)])
+        report, markdown = read_report(tmp / "dry-run")
+    assert code == 0
+    context = report["context"]
+    assert context["end_source"] == "default(今天, UTC)"
+    assert context["window"][1] == str(probe.utc_now().date())
+    assert context["window"][1] in markdown, "解析后的日期必须出现在报告页首"
 
 
 # --------------------------------------------------------------------------- #

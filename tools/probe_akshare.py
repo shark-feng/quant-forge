@@ -411,7 +411,17 @@ def mapper_check(
 # 探测上下文
 # --------------------------------------------------------------------------- #
 def latest_quarter_end(day: Any) -> pd.Timestamp:
-    """``≤ day`` 的最近季末（财务报告期口径）。"""
+    """``≤ day`` 的最近**已过**季末（财务报告期口径）。
+
+    刻意取「已过」的那个季末，而不是「当季未到的季末」：
+
+    - ``2022-03-15`` → ``2021-12-31``（**不是** ``2022-03-31``）；
+    - ``2022-03-31``（当天就是季末）→ ``2022-03-31``；
+    - ``2022-01-01`` → ``2021-12-31``；``2022-04-01`` → ``2022-03-31``。
+
+    理由：未到季末 / 尚未公布的报告期会让 ``stock_yjbb_em`` 返回**空表**，
+    使用者会把「参数不对」误读成「接口不可用」——探测工具最忌讳给出这种假结论。
+    """
     ts = pd.Timestamp(day).normalize()
     if ts == ts + pd.offsets.MonthEnd(0) and ts.month in (3, 6, 9, 12):
         return ts
@@ -421,9 +431,21 @@ def latest_quarter_end(day: Any) -> pd.Timestamp:
     return pd.Timestamp(year=ts.year, month=quarter_end_month, day=1) + pd.offsets.MonthEnd(0)
 
 
+#: ``report_period`` 缺省时的取值理由（写进报告，避免读者以为是「随便挑的日期」）
+_REPORT_PERIOD_REASON = (
+    "未显式指定 → 取 ≤ --end 的最近**已过**季末；避开未到季末/尚未公布的报告期，"
+    "否则 fundamentals 接口会返回空表，被误判为「接口不可用」"
+)
+
+
 @dataclass(slots=True)
 class ProbeContext:
-    """一次探测的**固定口径**（窗口、标的、重试次数、超时阈值）。"""
+    """一次探测的**固定口径**（窗口、标的、重试次数、超时阈值）。
+
+    ``end_source`` / ``report_period_source`` 记录「这个日期是算出来的还是传进来的」：
+    命令字符串里的 ``--end`` 可以省略（不可复现），但**报告里的日期必须可复现**，
+    且读者要能一眼看出它是默认推导还是显式指定。
+    """
 
     symbols: tuple[str, ...] = DEFAULT_SYMBOLS
     index_code: str = DEFAULT_INDEX
@@ -432,13 +454,19 @@ class ProbeContext:
     report_period: pd.Timestamp = field(default_factory=lambda: pd.Timestamp("1970-01-01"))
     timeout: float = DEFAULT_TIMEOUT
     repeats: int = DEFAULT_REPEATS
+    end_source: str = ""
+    report_period_source: str = ""
+    report_period_reason: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "symbols": list(self.symbols),
             "index_code": self.index_code,
             "window": [str(self.start.date()), str(self.end.date())],
+            "end_source": self.end_source,
             "report_period": str(self.report_period.date()),
+            "report_period_source": self.report_period_source,
+            "report_period_reason": self.report_period_reason,
             "timeout_seconds": self.timeout,
             "repeats": self.repeats,
         }
@@ -457,7 +485,8 @@ def make_context(
     """构造探测上下文。
 
     ``end`` 缺省为**今天（UTC）**；``start = end - days``；``report_period`` 缺省为
-    ``≤ end`` 的最近季末。三者都写进报告，保证「同一命令 + 同一天 = 同一口径」。
+    ``≤ end`` 的最近**已过**季末。解析后的**绝对日期与来源**都写进报告，
+    保证「报告里的日期」可复现（命令里省略了 ``--end`` 也不影响复查）。
     """
     if not symbols:
         raise ValueError("symbols 不能为空：探测需要至少一个标的")
@@ -467,18 +496,30 @@ def make_context(
         raise ValueError("repeats 至少为 1")
     if timeout <= 0:
         raise ValueError("timeout 必须为正")
-    last_day = pd.Timestamp(end).normalize() if end is not None else pd.Timestamp(utc_now().date())
+
+    explicit_end = end is not None
+    last_day = pd.Timestamp(end).normalize() if explicit_end else pd.Timestamp(utc_now().date())
+    explicit_period = report_period is not None
+    period = (
+        pd.Timestamp(report_period).normalize() if explicit_period else latest_quarter_end(last_day)
+    )
     return ProbeContext(
         symbols=tuple(str(s) for s in symbols),
         index_code=str(index_code),
         start=last_day - pd.Timedelta(days=int(days)),
         end=last_day,
-        report_period=(
-            pd.Timestamp(report_period).normalize() if report_period is not None
-            else latest_quarter_end(last_day)
-        ),
+        report_period=period,
         timeout=float(timeout),
         repeats=int(repeats),
+        end_source="cli(--end)" if explicit_end else "default(今天, UTC)",
+        report_period_source=(
+            "cli(--report-period)" if explicit_period else "derived(最近已过季末)"
+        ),
+        report_period_reason=(
+            f"由 --report-period 显式指定（{period.date()}）"
+            if explicit_period
+            else f"{_REPORT_PERIOD_REASON}（实际取 {period.date()}）"
+        ),
     )
 
 
@@ -1037,8 +1078,16 @@ def render_markdown(report: Mapping[str, Any]) -> str:
     lines.append(f"- **akshare 版本**：`{report.get('akshare_version')}`")
     context = report.get("context") or {}
     lines.append(
-        f"- **探测窗口**：{context.get('window')} ｜ **报告期**：`{context.get('report_period')}`"
-        f" ｜ **标的**：{context.get('symbols')} ｜ **指数**：`{context.get('index_code')}`"
+        f"- **探测窗口（已解析的绝对日期）**：{context.get('window')}"
+        f" ｜ end 来源：{context.get('end_source')}"
+    )
+    lines.append(
+        f"- **财务报告期**：`{context.get('report_period')}`"
+        f"（来源：{context.get('report_period_source')}）"
+    )
+    lines.append(f"- **报告期取值理由**：{context.get('report_period_reason')}")
+    lines.append(
+        f"- **标的**：{context.get('symbols')} ｜ **指数**：`{context.get('index_code')}`"
     )
     lines.append(
         f"- **超时判定阈值**：{context.get('timeout_seconds')}s（判定超时，**不中断调用**）"
