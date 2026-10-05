@@ -113,11 +113,18 @@ AKShare 的接口名与字段**随版本变化**，因此本项目**不照搬其
 而是先按数学模型所需字段反推数据规格（`docs/11` §3），再用探测脚本核对可用性：
 
 ```powershell
-python tools\probe_akshare.py --out reports\_probe\akshare_capabilities.json
+python tools\probe_akshare.py --out reports\_probe
 ```
 
-输出为 `capabilities` 报告：每个候选接口的**可用性 / 字段清单 / 行数量级 / 速率限制表现**。
+`--out` 是**目录**（不是文件路径），产物为 `akshare_capability_report.{json,md}`：
+每个候选接口的**可用性 / 完整列名与 dtype / 行数 / 耗时中位数 / 分页参数 / 单位判定**，
+并直接给出「按本报告该改 `ENDPOINTS`/`MAPPERS` 的哪一处」的建议。
 **未通过探测的接口不会进入字段映射表。**
+
+> 离线自检（**不装 akshare、不联网**、退出码恒 0，可当 CI smoke test）：
+> `python tools\probe_akshare.py --dry-run`，产物落在 `<--out>\dry-run\`（假数据，已 gitignore）。
+> `--timeout` 是**判定超时**（超过即标 `timeout` 并记录耗时），**不中断调用**；
+> 想量耗时中位数用 `--repeats 3`（默认 1 次，避免触发对端限流）。
 
 ### 3. 抓取数据到本地缓存
 
