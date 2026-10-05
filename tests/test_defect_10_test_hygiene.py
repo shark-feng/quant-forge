@@ -252,3 +252,57 @@ def test_skip_helper_raises_unittest_skiptest():
     assert not issubclass(pytest.skip.Exception, Exception), (
         "pytest 的 Skipped 若变成 Exception 子类，本守护的前提需重新评估（并更新 docs/17 §10.2）"
     )
+
+
+def test_compat_skip_shows_as_skipped_under_pytest():
+    """V4 守护：pytest 环境下 `compat.skip()` 必须显示为 **SKIPPED**，而不是 ERROR/FAILED。
+
+    背景（V1）：`skip` 曾随「装没装 pytest」在两种异常之间切换，而 `pytest.skip.Exception`
+    继承自 `BaseException` → 零依赖运行器整体中止。语义统一为 `unittest.SkipTest` 后，
+    还必须验证**真实 pytest 也把它当作跳过**（否则「跳过」会变成「错误」，同样被误读）。
+
+    实现方式：**子进程实跑 pytest**，靶子是 `tests/test_skip_semantics.py`（该用例永远跳过）。
+    本机无 pytest 时自身 skip（断言代码保留，装了即生效）。
+    """
+    import os
+    import subprocess
+    import sys
+
+    try:
+        import pytest  # noqa: F401
+    except ImportError:
+        skip("本机未安装 pytest，无法验证 pytest 侧的显示（断言保留，装上即生效）")
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "tests/test_skip_semantics.py",
+            # 注意：`pyproject.toml` 的 addopts 已含 `-q`，单个 `-v` 会被**抵消**
+            # （pytest 按 -v/-q 数量差算 verbosity）→ 必须用 `-vv` 才真正 verbose；
+            # `-rA` 保证 short summary 列出 skipped 项。
+            "-vv",
+            "-rA",
+            "--no-header",
+            "-p",
+            "no:cacheprovider",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(PROJECT_ROOT),
+        encoding="utf-8",
+        errors="replace",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+    )
+    assert proc.returncode == 0, f"pytest 子进程失败（{proc.returncode}）：\n{proc.stdout[-1500:]}"
+    assert "SKIPPED" in proc.stdout, f"skip 未被 pytest 显示为 SKIPPED：\n{proc.stdout[-1500:]}"
+    target = [
+        line
+        for line in proc.stdout.splitlines()
+        if "test_compat_skip_is_reported_as_skipped" in line
+    ]
+    assert target and "SKIPPED" in target[0], (
+        f"探针用例那一行未显示 SKIPPED：{target}\n完整输出：\n{proc.stdout[-1500:]}"
+    )
+    assert "ERROR" not in proc.stdout, f"skip 被当成 ERROR：\n{proc.stdout[-1500:]}"

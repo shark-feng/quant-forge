@@ -13,9 +13,9 @@
 | 项目 | 结果 |
 | --- | --- |
 | 测试运行方式 | `python tests/run_tests.py`（零依赖运行器，与 pytest 双兼容） |
-| 用例总数 | **781** |
-| 本机实测结果 | 通过 780 / **跳过 1** / 失败 0（跳过项为环境门控，见下；两套运行器实测一致，见 `docs/17` §10） |
-| 测试模块 | 53 个 |
+| 用例总数 | **783** |
+| 本机实测结果 | 通过 781 / **跳过 2** / 失败 0（跳过项为环境门控 + 一条刻意探针；两套运行器实测一致，见 `docs/17` §10） |
+| 测试模块 | 54 个 |
 | 代码规模 | `src/aqs` 46 个文件约 9.0k 行；`tests` 41 个文件约 6.5k 行 |
 
 > **关于 skip（不要读成通过）**：少数用例是**环境门控**的 —— 例如
@@ -61,7 +61,7 @@
 | `test_defect_07_risk_stats_schema.py` | 8 | **回归 #7** stats 口径一致性 |
 | `test_defect_08_listing_date.py` | 11 | **回归 #8** 上市日不得静默兜底 |
 | `test_defect_09_volume_ratio_guard.py` | 13 | **回归 #9** 量比基准阈值 |
-| `test_defect_10_test_hygiene.py` | 13 | **回归 #10** 测试代码坏味道（AST 守护）+ **收集规则一致性守护**（运行器 ↔ pytest 规则 ↔ unittest 加载器；含继承方法、`@property`、非 `Test*` 类的正反例） |
+| `test_defect_10_test_hygiene.py` | 14 | **回归 #10** 测试代码坏味道（AST 守护）+ **收集规则一致性守护**（运行器 ↔ pytest 规则 ↔ unittest 加载器；含继承方法、`@property`、非 `Test*` 类的正反例） |
 | `test_defect_12_demo_scope.py` | 12 | **回归 #12** 数据口径四元组与 CLI |
 | `test_defect_11_docs_consistency.py` | 12 | **回归 #11** 文档与代码一致性（AST/正则守护；含 docs/00 与 CHANGELOG 数字守护、选型待核实项附录指引） |
 | `test_defect_15_order_field_semantics.py` | 8 | **回归 #15** 订单字段语义（final_status / last_reject_reason / 顺延历史） |
@@ -367,7 +367,7 @@ volume `{industry_exposure:26, max_position_per_symbol:18}`。
 | M2 工程化 | 文件全部交付；**推送由宿主机执行** |
 | **M4 取数层** | **M4-1~M4-10 全部交付**（`102fb3e`…`905dae4`）：抽象 / 缓存 / 限流 / 质量 / 三实现 + AKShare 骨架 / 注册表 / 适配层；成文见 `docs/14_provider_layer.md` |
 | **M4 契约测试** | **4 provider × 8 项 = 32 条**（含区间相交的正反例） |
-| 测试 | **收集 781 个用例**（53 个模块；第一轮 398 → 本轮 781） |
+| 测试 | **收集 783 个用例**（54 个模块；第一轮 398 → 本轮 783） |
 | 新增机械守护 | 整手不变量 / 跨进程确定性 / 乱码编码 / 工程化一致性 / 文档数字一致性 / **收集规则一致性（运行器↔pytest↔unittest）** |
 
 ### 11.1 「不报错、只让结果悄悄失真」类缺陷清单（按三种类型归类）
@@ -395,7 +395,6 @@ volume `{industry_exposure:26, max_position_per_symbol:18}`。
 | 6 | `FileProvider` 三处不一致 | ① 未知标的全不存在时抛异常（应为空表+warning）② 成分过滤为空时无 warning ③ 日历 `Provenance.rows` 用了行情行数 | M4-9 契约测试（C1/C4/C8） |
 | 7 | 缓存 `ttl_hours <= 0` 被当成「立即过期」 | 实际是「一律视为命中」→ 测试造不出 stale 状态，断言形同虚设 | M4-8 的增量用例（并已写进 docstring） |
 | 8 | 注册表 `provider_capabilities(strict=True)` 只判「有没有抛异常」 | 文件型 provider 的探测失败表现为 `daily_bars=False` 而非异常 → 闸门形同虚设 | M4-7 的能力查询用例 |
-| 9 | `skip` 绑定到 `pytest.skip`（V1） | pytest 装好后运行器**整体中止且不打印摘要**；触发条件是**环境变化** | V1 用真实 pytest 验证时（`docs/17` §10.2） |
 
 > 防御：**收集逻辑只有一份实现**；**能力/溯源的判定必须落在语义上，而不是「有没有抛异常」上**；
 > 引入新的测试组织方式时同时验证两套运行器；测试基础设施的守护（`test_defect_10_test_hygiene.py`）。
@@ -404,10 +403,20 @@ volume `{industry_exposure:26, max_position_per_symbol:18}`。
 
 | # | 缺陷 | 表现 | 发现方式 |
 |---|---|---|---|
-| 10 | `generate_market_data` 的属性序列与代码分配耦合（V2） | 传/不传 `symbols`、或传的数量/顺序不同 ⇒ 同一位置的属性漂移（价格路径 8.2 → 20.11）；**做一致性比较时得出假结论** | M4-10 一致性比较误判后逐项实测（`docs/17` §11） |
+| 9 | `generate_market_data` 的属性序列与代码分配耦合（V2） | 传/不传 `symbols`、或传的数量/顺序不同 ⇒ 同一位置的属性漂移（价格路径 8.2 → 20.11）；**做一致性比较时得出假结论** | M4-10 一致性比较误判后逐项实测（`docs/17` §12） |
 
 > 防御：**禁止同一 API 的不同参数路径产出不同的内在状态**（`docs/DEVELOPMENT.md` §3）——
 > 内在属性绑定到 `(seed, 位置序号)` 的独立随机流；守护见 `tests/test_synthetic_parameters.py`。
 
-> 三类共同点：**都必须在写实现时就把「什么算正确」写成可执行断言**（正例 + 反例），
+#### 类型四：环境变化触发的静默失效（装没装某个包，行为不同）
+
+| # | 缺陷 | 表现 | 触发条件 | 发现方式 |
+|---|---|---|---|---|
+| 10 | `tests/compat.py` 的 `skip` 随「装没装 pytest」在两种异常间切换（V1） | 装有 pytest 时 `skip` 抛 `pytest.skip.Exception`（继承 **`BaseException`**）→ 零依赖运行器**整体中止且不打印摘要**（退出码 1、无「通过/失败」行）；"没有 FAIL 字样"被读成"没有失败" | **装没装 pytest** | V1 用真实 pytest 验证等价性时（`docs/17` §10.2） |
+
+> 防御：**测试基础设施的 `skip`/`xfail`/`fixture` 语义不得依赖第三方包的存在性** ——
+> 存在性只决定「走哪条 fallback」，不决定「抛什么类型的异常」（`docs/DEVELOPMENT.md` §3）；
+> 守护为**子进程实跑 pytest 并断言显示 `SKIPPED`**（`test_compat_skip_shows_as_skipped_under_pytest`）。
+
+> 四类共同点：**都必须在写实现时就把「什么算正确」写成可执行断言**（正例 + 反例），
 > 而不是靠"看代码觉得对"。本清单本身也是交付物之一 —— 每条都对应一个已落地的守护。

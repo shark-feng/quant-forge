@@ -40,7 +40,8 @@
 | 测试运行器（`tests/run_tests.py`）与 pytest 必须在**收集阶段**也保持一致 | 引入新的测试组织方式（继承、参数化、fixture、装饰器）时，必须同时验证两种运行器的**收集数**与执行结果一致。收集阶段不一致**不报错**，只会让「看起来全绿」变成「实际没跑」——实测 `vars(Class)` 不含继承方法，mixin 里的契约检查会被运行器收集 0 条、而 pytest 收集 32 条（机械守护见 `tests/test_defect_10_test_hygiene.py`） |
 | 不得复制第二份「用例收集」实现 | 收集逻辑只有 `tests/run_tests.py::_iter_tests` 一份：文档同步工具与文档一致性守护都必须**调用它**。本项目曾有三份独立实现（运行器 / `tools/sync_doc_counts.py` / `test_defect_11` 的 AST 计数），其中两份**各自都错却互相印证**，于是文档数字少算了 2 条而守护全绿 |
 | 不得把 `skip` 机制绑定到只被一种运行器识别的异常 | `tests/compat.py::skip` 统一抛 `unittest.SkipTest`（两套运行器都识别）。实测（V1，pytest 9.1.1）：绑成 `pytest.skip` 后，因 `Skipped` 继承自 **`BaseException`**，零依赖运行器在第一次 `skip()` 时**整体中止且不打印摘要**（退出码 1、无「通过/失败」行）——"没有 FAIL 字样"会被误读成"没有失败"。守护见 `test_defect_10_test_hygiene.py::test_skip_helper_raises_unittest_skiptest` |
-| 禁止同一 API 的不同参数路径产出不同的**内在状态**（而非仅参数值不同） | 典型例子：`generate_market_data` 传/不传 `symbols` 时，标的的属性序列必须**按位置相同**（上市窗口 / 退市 / ST / 价格路径 / 财务数值）。理由：这类缺陷只在「一条路径传参、一条不传」（或数量/顺序不同）时暴露，**做一致性测试时会得出假结论** —— 本项目已实际因此误判过一次（M4-10 首次一致性比较把「股票池没对齐」读成「两个入口数据不同」）。正确做法：把每个位置的内在属性绑定到 `(seed, 位置序号)` 的**独立随机流**，而不是共用一个顺序流。守护见 `tests/test_synthetic_parameters.py`；另注意「属性属于位置、代码由调用方顺序决定」是刻意语义（见 `docs/17` §11.4） |
+| 禁止同一 API 的不同参数路径产出不同的**内在状态**（而非仅参数值不同） | 典型例子：`generate_market_data` 传/不传 `symbols` 时，标的的属性序列必须**按位置相同**（上市窗口 / 退市 / ST / 价格路径 / 财务数值）。理由：这类缺陷只在「一条路径传参、一条不传」（或数量/顺序不同）时暴露，**做一致性测试时会得出假结论** —— 本项目已实际因此误判过一次（M4-10 首次一致性比较把「股票池没对齐」读成「两个入口数据不同」）。正确做法：把每个位置的内在属性绑定到 `(seed, 位置序号)` 的**独立随机流**，而不是共用一个顺序流。守护见 `tests/test_synthetic_parameters.py`；另注意「属性属于位置、代码由调用方顺序决定」是刻意语义（见 `docs/17` §12.4） |
+| 禁止测试基础设施的 `skip`/`xfail`/`fixture` 语义**依赖第三方包的存在性** | **存在性只决定「走哪条 fallback」，不决定「抛什么类型的异常」**。若第三方包未安装时抛 A、安装后抛 B，等同于让同一测试在不同环境表现不同。正确做法：**语义统一**（如一律抛 `unittest.SkipTest`），第三方特性只在被显式调用时生效。实测（V1，pytest 9.1.1）：`skip` 曾随「装没装 pytest」在 `unittest.SkipTest` 与 `pytest.skip.Exception` 之间切换，而后者继承自 `BaseException` → 零依赖运行器在装好 pytest 后**整体中止且不打印摘要**。守护见 `test_defect_10_test_hygiene.py::test_compat_skip_shows_as_skipped_under_pytest`（子进程实跑 pytest，断言显示为 `SKIPPED` 而非 `ERROR`） |
 
 > **测试执行约定**：`pyproject.toml` 已设 `addopts = "-q"`，故执行 pytest **不要再传 `-q`**
 > （`-q` + `-q` = `-qq` 会抑制 `N passed` 摘要行，表现为"有进度点、退出码 0、却没有结果行"）。
@@ -87,7 +88,7 @@
 | M8 | R2-08 偏差与压力套件 | ⏳ `15_testing_suite.md` | — | — | 待设计 |
 | M9 | R2-09 第二阶段设计 | ⏳ `16_phase2_design.md` | — | — | 待设计 |
 
-**当前测试状态**：781 个用例（53 个测试模块）。环境门控用例以 skip 列出，不计入通过。
+**当前测试状态**：783 个用例（54 个测试模块）。环境门控用例以 skip 列出，不计入通过。
 
 ### 第三轮（诊断 + 修复 + 工程化）
 
