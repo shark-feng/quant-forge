@@ -1,0 +1,396 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shark-feng/quant-forge/docs/data/fetch_summary.schema.json",
+  "title": "AKShare 抓取摘要（tools/fetch_data.py 的 summary.json）",
+  "description": "M5-2 的机器可读产物格式，M6/M7 会直接消费。tests/schema_validator.py 是共用校验器，tests/test_schema_contracts.py 用同一组伪造验证「additionalProperties/required/type 真的被执行」。",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "run_id",
+    "mode",
+    "status",
+    "exit_code",
+    "exit_code_reason",
+    "dry_run_estimated_exit_if_live",
+    "dry_run_estimate_note",
+    "failure",
+    "command",
+    "invocation",
+    "out",
+    "created_at",
+    "finished_at",
+    "provider",
+    "request",
+    "counts",
+    "steps",
+    "degradation_notes",
+    "quality",
+    "manifest",
+    "incremental",
+    "timing",
+    "artifacts",
+    "audit",
+    "warnings_summary",
+    "limitations"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "run_id": { "type": "string", "minLength": 1 },
+    "mode": { "enum": ["dry-run", "live"] },
+    "status": { "enum": ["ok", "degraded", "failed"] },
+    "exit_code": { "type": "integer", "enum": [0, 1, 2] },
+    "exit_code_reason": { "type": "string", "minLength": 1 },
+    "dry_run_estimated_exit_if_live": { "type": ["integer", "null"], "enum": [0, 2, null] },
+    "dry_run_estimate_note": { "type": ["string", "null"] },
+    "failure": {
+      "type": ["object", "null"],
+      "required": ["type", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "minLength": 1 },
+        "message": { "type": "string" }
+      }
+    },
+    "command": { "type": "string", "minLength": 1 },
+    "invocation": {
+      "type": "object",
+      "required": ["argv", "command", "cwd", "python", "git"],
+      "properties": {
+        "argv": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "command": { "type": "string" },
+        "cwd": { "type": "string" },
+        "python": { "type": "string" },
+        "git": { "type": "object" }
+      }
+    },
+    "out": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "minLength": 1 },
+    "finished_at": { "type": "string", "minLength": 1 },
+    "provider": {
+      "type": "object",
+      "required": ["name", "akshare_version", "capabilities", "data_config"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "akshare_version": { "type": ["string", "null"] },
+        "capabilities": {
+          "type": "object",
+          "required": [
+            "daily_bars",
+            "adjustment_factors",
+            "suspensions",
+            "price_limits",
+            "st_flags",
+            "listing_dates",
+            "delistings",
+            "index_members",
+            "fundamentals",
+            "industry",
+            "market_cap",
+            "intraday",
+            "default_adjust",
+            "notes"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "daily_bars": { "type": "boolean" },
+            "adjustment_factors": { "type": "boolean" },
+            "suspensions": { "type": "boolean" },
+            "price_limits": { "type": "boolean" },
+            "st_flags": { "type": "boolean" },
+            "listing_dates": { "type": "boolean" },
+            "delistings": { "type": "boolean" },
+            "index_members": { "type": "boolean" },
+            "fundamentals": { "type": "boolean" },
+            "industry": { "type": "boolean" },
+            "market_cap": { "type": "boolean" },
+            "intraday": { "type": "boolean" },
+            "default_adjust": { "type": ["string", "null"] },
+            "notes": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "data_config": {
+          "type": "object",
+          "required": [
+            "config_file",
+            "provider",
+            "root",
+            "adjustment",
+            "failure_policy",
+            "max_missing_ratio",
+            "listing_date_policy",
+            "quality_strict",
+            "unit_conversion",
+            "cache",
+            "rate_limit",
+            "clock"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "config_file": { "type": "string", "minLength": 1 },
+            "provider": { "type": "string", "minLength": 1 },
+            "root": { "type": "string", "minLength": 1 },
+            "adjustment": { "enum": ["hfq", "none"] },
+            "failure_policy": { "enum": ["fallback", "fail"] },
+            "max_missing_ratio": { "type": "number", "minimum": 0 },
+            "listing_date_policy": { "type": "string", "minLength": 1 },
+            "quality_strict": { "type": "boolean" },
+            "unit_conversion": {
+              "type": "object",
+              "required": ["volume_to_shares", "amount_to_yuan"],
+              "additionalProperties": false,
+              "properties": {
+                "volume_to_shares": { "type": "number", "minimum": 0 },
+                "amount_to_yuan": { "type": "number", "minimum": 0 }
+              }
+            },
+            "cache": {
+              "type": "object",
+              "required": ["root", "version", "fmt", "ttl_hours", "refresh"],
+              "additionalProperties": false,
+              "properties": {
+                "root": { "type": "string", "minLength": 1 },
+                "version": { "type": "integer", "minimum": 1 },
+                "fmt": { "enum": ["parquet", "csv"] },
+                "ttl_hours": { "type": "number", "minimum": 0 },
+                "refresh": { "type": "boolean" }
+              }
+            },
+            "rate_limit": { "type": "object" },
+            "clock": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "request": {
+      "type": "object",
+      "required": [
+        "start",
+        "end",
+        "days",
+        "index_codes",
+        "symbols",
+        "adjust",
+        "fmt",
+        "fundamentals",
+        "industry",
+        "refresh"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "start": { "type": "string", "minLength": 1 },
+        "end": { "type": "string", "minLength": 1 },
+        "days": { "type": "integer", "minimum": 0 },
+        "index_codes": { "type": "array", "items": { "type": "string" } },
+        "symbols": {
+          "type": "object",
+          "required": ["total", "kept", "source", "max_symbols", "truncated"],
+          "additionalProperties": false,
+          "properties": {
+            "total": { "type": "integer", "minimum": 0 },
+            "kept": { "type": "integer", "minimum": 0 },
+            "source": { "enum": ["cli", "index", "cli+index", "none", "unresolved"] },
+            "max_symbols": { "type": ["integer", "null"] },
+            "truncated": { "type": "boolean" }
+          }
+        },
+        "adjust": { "enum": ["hfq", "none"] },
+        "fmt": { "enum": ["parquet", "csv"] },
+        "fundamentals": { "type": "boolean" },
+        "industry": { "type": "boolean" },
+        "refresh": { "type": "boolean" }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "required": [
+        "symbols_requested",
+        "symbols_with_bars",
+        "symbols_without_bars",
+        "symbols_skipped_empty",
+        "raw_files_written",
+        "raw_files_cleared",
+        "raw_bytes",
+        "bars_rows",
+        "bars_start",
+        "bars_end",
+        "index_member_rows",
+        "fundamental_rows",
+        "manifest_bars_keys",
+        "calendar_days",
+        "industry_rows"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "symbols_requested": { "type": "integer", "minimum": 0 },
+        "symbols_with_bars": { "type": "integer", "minimum": 0 },
+        "symbols_without_bars": { "type": "integer", "minimum": 0 },
+        "symbols_skipped_empty": { "type": "integer", "minimum": 0 },
+        "raw_files_written": { "type": "integer", "minimum": 0 },
+        "raw_files_cleared": { "type": "integer", "minimum": 0 },
+        "raw_bytes": { "type": "integer", "minimum": 0 },
+        "bars_rows": { "type": "integer", "minimum": 0 },
+        "bars_start": { "type": ["string", "null"] },
+        "bars_end": { "type": ["string", "null"] },
+        "index_member_rows": { "type": "integer", "minimum": 0 },
+        "fundamental_rows": { "type": "integer", "minimum": 0 },
+        "manifest_bars_keys": { "type": "integer", "minimum": 0 },
+        "calendar_days": { "type": "integer", "minimum": 0 },
+        "industry_rows": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "steps": {
+      "type": "object",
+      "additionalProperties": { "enum": ["ok", "degraded", "failed", "skipped"] }
+    },
+    "degradation_notes": { "type": "array", "items": { "type": "string" } },
+    "quality": {
+      "type": "object",
+      "required": ["ok", "errors", "warnings", "report"],
+      "additionalProperties": false,
+      "properties": {
+        "ok": { "type": "boolean" },
+        "errors": { "type": "integer", "minimum": 0 },
+        "warnings": { "type": "integer", "minimum": 0 },
+        "report": { "const": "quality_report.json" }
+      }
+    },
+    "manifest": {
+      "type": "object",
+      "required": ["entries_total", "entries_before", "by_dataset", "source", "digest", "report"],
+      "additionalProperties": false,
+      "properties": {
+        "entries_total": { "type": "integer", "minimum": 0 },
+        "entries_before": { "type": "integer", "minimum": 0 },
+        "by_dataset": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+        "source": { "type": "string", "minLength": 1 },
+        "digest": { "type": "string", "minLength": 1 },
+        "report": { "const": "manifest.json" }
+      }
+    },
+    "incremental": {
+      "type": "object",
+      "required": [
+        "mode",
+        "by_dataset",
+        "requests_avoided_symbols",
+        "audit_log_lines_delta",
+        "unit",
+        "method"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "mode": { "enum": ["full", "resume", "refresh"] },
+        "by_dataset": {
+          "type": "object",
+          "patternProperties": {
+            "^[a-z_]+$": {
+              "type": "object",
+              "required": [
+                "keys_before",
+                "keys_after",
+                "keys_refreshed",
+                "keys_untouched",
+                "rows_before",
+                "rows_after",
+                "rows_delta",
+                "max_date_before",
+                "max_date_after"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "keys_before": { "type": "integer", "minimum": 0 },
+                "keys_after": { "type": "integer", "minimum": 0 },
+                "keys_refreshed": { "type": "integer", "minimum": 0 },
+                "keys_untouched": { "type": "integer", "minimum": 0 },
+                "rows_before": { "type": "integer", "minimum": 0 },
+                "rows_after": { "type": "integer", "minimum": 0 },
+                "rows_delta": { "type": "integer" },
+                "max_date_before": { "type": ["string", "null"] },
+                "max_date_after": { "type": ["string", "null"] }
+              }
+            }
+          }
+        },
+        "requests_avoided_symbols": { "type": "integer", "minimum": 0 },
+        "audit_log_lines_delta": { "type": "integer" },
+        "unit": { "type": "string", "minLength": 1 },
+        "method": { "type": "string", "minLength": 1 },
+        "truncation": { "type": "string" }
+      }
+    },
+    "timing": {
+      "type": "object",
+      "required": [
+        "total_seconds",
+        "ingest_seconds",
+        "materialize_seconds",
+        "resolve_seconds",
+        "steps",
+        "steps_note",
+        "reports_seconds"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "total_seconds": { "type": "number", "minimum": 0 },
+        "ingest_seconds": { "type": "number", "minimum": 0 },
+        "materialize_seconds": { "type": "number", "minimum": 0 },
+        "resolve_seconds": { "type": "number", "minimum": 0 },
+        "steps": { "type": "object", "additionalProperties": { "type": "number", "minimum": 0 } },
+        "steps_note": { "type": "string", "minLength": 1 },
+        "reports_seconds": { "type": "number", "minimum": 0 }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "required": [
+        "summary",
+        "quality_report",
+        "manifest",
+        "report_md",
+        "data_root",
+        "data_format",
+        "provider_for_readback",
+        "index_members",
+        "fundamentals"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "summary": { "const": "summary.json" },
+        "quality_report": { "const": "quality_report.json" },
+        "manifest": { "const": "manifest.json" },
+        "report_md": { "const": "report.md" },
+        "data_root": { "type": "string", "minLength": 1 },
+        "data_format": { "const": "file-per-symbol" },
+        "provider_for_readback": {
+          "type": "object",
+          "required": ["name", "root", "index_members_path", "fundamentals_path"],
+          "additionalProperties": false,
+          "properties": {
+            "name": { "enum": ["parquet", "csv"] },
+            "root": { "type": "string", "minLength": 1 },
+            "index_members_path": { "type": ["string", "null"] },
+            "fundamentals_path": { "type": ["string", "null"] }
+          }
+        },
+        "index_members": { "type": ["string", "null"] },
+        "fundamentals": { "type": ["string", "null"] }
+      }
+    },
+    "audit": {
+      "type": "object",
+      "required": ["path", "lines_before", "lines_after", "lines_delta", "note"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "lines_before": { "type": "integer", "minimum": 0 },
+        "lines_after": { "type": "integer", "minimum": 0 },
+        "lines_delta": { "type": "integer" },
+        "note": { "type": "string", "minLength": 1 }
+      }
+    },
+    "warnings_summary": { "type": "array", "items": { "type": "string" } },
+    "limitations": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+  }
+}

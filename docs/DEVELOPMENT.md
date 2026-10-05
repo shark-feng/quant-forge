@@ -88,7 +88,7 @@
 | M8 | R2-08 偏差与压力套件 | ⏳ `15_testing_suite.md` | — | — | 待设计 |
 | M9 | R2-09 第二阶段设计 | ⏳ `16_phase2_design.md` | — | — | 待设计 |
 
-**当前测试状态**：808 个用例（55 个测试模块）。环境门控用例以 skip 列出，不计入通过。
+**当前测试状态**：836 个用例（57 个测试模块）。环境门控用例以 skip 列出，不计入通过。
 
 ### 第三轮（诊断 + 修复 + 工程化）
 
@@ -103,23 +103,29 @@
 | M2 | R2-02 工程化 / GitHub 同步 | ✅ README / NOTICE / CHANGELOG | ✅ 工程化文件全部就绪 | ✅ `test_packaging.py` 23 条 | ⚠️ **推送由宿主机执行** |
 | M3 | R2-03 框架选型与边界纪律 | ✅ `12_framework_matrix.md` + `12_appendix_verification.md` | ✅ 见本文件 §7 | — | ⏳ **V1~V6 待宿主机联网执行** |
 | M4 | R2-04 DataProvider 抽象 | ✅ `18_m4_dataprovider.md` + **`14_provider_layer.md`（成文）** | ✅ M4-1~M4-10 全部交付（`102fb3e`…`905dae4`） | ✅ **157 条**（含 32 条四实现契约） | ✅ **已交付** |
-| M5 | R2-05 AKShare 联网适配 | ✅ `11_akshare_provider.md` | ✅ **阶段 A**：`tools/probe_akshare.py`（M5-1，离线 dry-run 可验收） | ✅ `test_probe_akshare.py` 15 条 | ⏳ **阶段 B 待宿主机执行**：联网探测 → 按报告修正 `ENDPOINTS`/`MAPPERS` → `tools/fetch_data.py` 抓取 |
+| M5 | R2-05 AKShare 联网适配 | ✅ `11_akshare_provider.md` + `19_m5_fetch_data.md` | ✅ **阶段 A**：`probe_akshare.py`（M5-1）+ `fetch_data.py`（M5-2，**复用 `ingest_from_provider`**） | ✅ `test_probe_akshare` 21 + `test_fetch_data` 24 + `test_schema_contracts` 4 | ⏳ **阶段 B 待宿主机执行**：联网探测 → 按报告修正 `ENDPOINTS`/`MAPPERS` → 真实抓取 |
 | M5~M9 | 见第二轮里程碑表 | — | — | — | 待开工 |
 
 > ⚠️ **M5 的阶段划分（不要混用结论）**：
-> **阶段 A（本仓交付、完全离线）**=`tools/probe_akshare.py` 工具 + dry-run 验收 + `docs/data/probe_report.schema.json`；
-> **阶段 B（必须由宿主机联网执行）**=真实探测 → 按报告在 `ENDPOINTS`/`MAPPERS` **单点修正** → `tools/fetch_data.py` 抓取。
+> **阶段 A（本仓交付、完全离线）**=`tools/probe_akshare.py`（M5-1）+ `tools/fetch_data.py`（M5-2）
+> 两个工具 + dry-run 验收 + `docs/data/{probe_report,fetch_summary}.schema.json` 两份格式契约；
+> **阶段 B（必须由宿主机联网执行）**=真实探测 → 按报告在 `ENDPOINTS`/`MAPPERS` **单点修正** → 真实抓取。
 > 阶段 A **从未发起过任何网络请求**，因此任何「AKShare 接口可用」的结论都还不成立。
 >
 > ```powershell
 > # 阶段 A 的离线自检（CI 可跑；不装 akshare、不联网；退出码恒 0）
 > python tools\probe_akshare.py --dry-run
-> # 阶段 B：真实探测（产物落 docs\data\，应提交）；退出码 ≥1 个端点可用 → 0，全部失败 → 2
+> python tools\fetch_data.py --dry-run
+> # 阶段 B①：真实探测（产物落 docs\data\，应提交）；≥1 个端点可用 → 0，全部失败 → 2
 > python tools\probe_akshare.py --out docs\data --symbols 600000,000001 --index 000300.SH
+> # 阶段 B②：按报告修正 ENDPOINTS/MAPPERS 后真实抓取（四份产物在 reports\fetch\<run_id>\）
+> python tools\fetch_data.py --start 2020-01-01 --end 2025-12-31 --index 000300.SH
 > ```
 >
-> dry-run 产物固定在 `docs\data\dry-run\`（**已 gitignore**）：fixture 是手工构造的样例，
-> 把它的结论当真实结论就等于「验证通过」造假。
+> dry-run 产物固定在 `docs\data\dry-run\` 与 `reports\fetch\dry-run\`（**均已 gitignore**）：
+> fixture 是手工构造的样例，把它的结论当真实结论就等于「验证通过」造假。
+> `fetch_data --dry-run` 还会**拒绝** `--data-root`、并把缓存重定向到 dry-run 边界内，
+> 以免 fixture 数据污染生产 `data/cache`（那会让之后真实抓取命中假缓存，且不报错）。
 
 > ⚠️ **M2 推送说明**：本机开发环境**对外网络被隔离**（沙箱设计，非故障）。
 > 因此 M2 的工程化文件已全部交付并**本地提交**，但 `git push` 必须在**宿主机**执行：

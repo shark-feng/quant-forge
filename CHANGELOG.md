@@ -10,6 +10,36 @@
 
 ## [Unreleased]
 
+### 新增（第三轮 M5-2：抓取落盘工具 `fetch_data.py`，**完全离线可验收**）
+
+- **`tools/fetch_data.py`**：只做四件事 —— 解析股票池 / 落盘 / 出报告 / 定退出码；
+  取数**完全复用** `ingest_from_provider`（M4-10 九步）。再写一遍取数流程就会变成
+  「两个入口口径不一致」，而这类漂移不报错。
+- **四份产物**（`reports/fetch/<run_id>/`，run_id 带微秒，冲突试 `-2/-3`，绝不复用崩溃残留）：
+  `summary.json`（口径/计数/步态/**每步耗时**/增量/指针）、`quality_report.json`
+  （**内嵌 `ProviderQualityReport.to_dict()` 原样**）、`manifest.json`（缓存清单的**投影** +
+  规范化 digest）、`report.md`（人读，嵌 `to_markdown()` 原文）。
+- **落盘形态**：`data/raw/<symbol>.parquet`（一标的一文件，canonical 含 `close_adj`）
+  \+ `data/index/index_members.parquet` + `data/fundamental/fundamentals.parquet`；
+  **不得建子目录**（加载器非递归 glob）、**空结果不落盘**、原子写、文件内仍写 `symbol` 列。
+  为什么落 canonical：`normalize_bars` 实测**幂等**（`add_adjusted_prices` 从不读已有 `close_adj`），
+  端到端用例断言回读后 `close_adj` **逐值相等**。
+- **`refresh` 与增量语义分开写清**：`--refresh` 是**整体替换**（先跨格式清空数据目录再全量写，
+  `.gitkeep` 保留，子目录存在即报错）；`--incremental` 是默认行为的显式写法（缓存优先续抓）。
+- **断点续抓的机械证明**：同一次 `--out` 跑两次 → 可缓存端点**零调用**、清单里 bars 无刷新、
+  两次落盘**逐行相等**；**快照类端点（成分/行业）例外** —— M4-8 的快照累积是状态，每跑必采。
+- **退出码**：ok→0；degraded→0（`--fail-on-degraded`→2）；`has_errors` 或 `failed`→2 且**报告仍写出**；
+  用法错误→2；脚本异常→1。`dry-run` 恒 0，真实估计值写进 `dry_run_estimated_exit_if_live`（估计值）。
+- **`--dry-run` 的安全边界**（硬断言）：所有写入路径必须落在 `<out>/dry-run/` 内，
+  缓存重定向到 `<out>/dry-run/cache`（跨 run 复用，才能验证续抓），`--data-root` 被**直接拒绝** ——
+  否则 fixture 数据会污染生产 `data/cache`，之后真实抓取命中假缓存**且不报错**。
+- **格式即契约**：`docs/data/fetch_summary.schema.json` + `tests/schema_validator.py`
+  （**两个报告契约共用同一份校验器**）+ `tests/test_schema_contracts.py`（同一组伪造砸两个 schema）。
+- **M4 侧三处小改**（都只加公开入口、不改语义）：`fetch_adjust_for` 统一复权口径（修 M5-1 遗留）、
+  `IngestReport.step_seconds`（每步耗时）、`atomic_write_frame/text` 与
+  `DataStore.index_members_frame/fundamentals_frame` 公开。
+- 成文文档 `docs/19_m5_fetch_data.md`（目标/边界/数据结构/接口/伪代码/决策记录/DoD）。
+
 ### 新增（第三轮 M5-1：AKShare 端点探测工具，**完全离线可验收**）
 
 - **`tools/probe_akshare.py`**：把 M4-8 的**候选**接口名/列名变成**实测**结论，产出
@@ -238,12 +268,12 @@
 
 ### 测试
 
-- 用例数 **398 → 808**（0.1.0 轮次新增 410 条）。按模块点算的构成：
+- 用例数 **398 → 836**（0.1.0 轮次新增 438 条）。按模块点算的构成：
   - 缺陷回归：#13 整手不变量 31 条、#14 跨进程确定性 4 条、#15 字段语义 8 条、#16 运行溯源 11 条；
   - 工程化与文档守护：`test_packaging.py` 20 条、`test_no_mojibake.py` 8 条、
     `test_defect_11_docs_consistency.py` 12 条（含 docs/00、CHANGELOG 数字守护与选型附录指引）；
   - 其余为第二轮缺陷回归（#1~#12）与既有模块用例。
-- 测试：收集 **808** 个用例（55 个测试模块）；环境门控用例以 skip 列出，不计入通过。
+- 测试：收集 **836** 个用例（57 个测试模块）；环境门控用例以 skip 列出，不计入通过。
   M4 阶段新增：配置 7、抽象 8、缓存 14、限流 15、质量 20、provider 实现 8（含 1 条环境门控）。
 
 > 第三轮续接的 5 条新增用例（Q1 的 DROPPED 终态守护 3 条、Q3 上传脚本健壮性 1 条、

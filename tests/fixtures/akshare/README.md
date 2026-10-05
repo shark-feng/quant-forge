@@ -14,7 +14,10 @@
 |---|---|---|
 | `stock_zh_a_hist_600000_raw.csv` | `stock_zh_a_hist(adjust="")` | 中文列名；**成交量单位是「手」**（映射需 ×100 转股）；含 `涨跌幅`（与复权因子交叉校验用） |
 | `stock_zh_a_hist_600000_hfq.csv` | `stock_zh_a_hist(adjust="hfq")` | 与原始序列的比值即复权因子；样例中 03-04 起比值由 2.0 变 2.2（模拟一次除权），用于验证「首日归一 + 比值变化」 |
+| `stock_zh_a_hist_000001_raw.csv` | 同 raw（第二只标的） | 多标的路径**必须**有第二只：否则 `tools/fetch_data.py` 的一标的一文件、跨标的合并、候选池截断都测不到 |
+| `stock_zh_a_hist_000001_hfq.csv` | 同 hfq（第二只标的） | 同上；03-04 起比值 2.0 → 2.2（与 600000 同步的除权假设） |
 | `stock_individual_info_em_600000.csv` | `stock_individual_info_em` | `item/value` 长表；`上市时间=19991110`（紧凑写法，映射需解析） |
+| `stock_individual_info_em_000001.csv` | 同上（第二只标的） | `上市时间=19910403`；缺它会让 `listing_date.policy=strict` 下的取数失败（这本身也是一条要覆盖的路径） |
 | `tool_trade_date_hist_sina.csv` | `tool_trade_date_hist_sina` | 单列 `trade_date` |
 | `index_stock_cons_csindex_000300_20220301.csv` | `index_stock_cons_csindex` | **当前**成分快照（03-01：600000/000001） |
 | `index_stock_cons_csindex_000300_20220315.csv` | 同上 | 第二次快照（03-15：000001/300750）→ 验证区间闭合：600000 在 03-14 退出 |
@@ -22,6 +25,11 @@
 | `stock_board_industry_name_em.csv` | `stock_board_industry_name_em` | 行业板块列表（银行 / 半导体） |
 | `stock_board_industry_cons_em_bank.csv` | `stock_board_industry_cons_em(银行)` | 板块成分；文件名用 ASCII（`bank`）以避免中文文件名在不同平台的编码问题 |
 | `stock_board_industry_cons_em_semi.csv` | `stock_board_industry_cons_em(半导体)` | 同上（`semi`） |
+
+> **窗口提示**：行情样例只覆盖 `2022-03-01 ~ 2022-03-07`，财务样例的公告日是 `2022-03-15`。
+> 因此 `tools/fetch_data.py --dry-run` 的默认窗口取 `2022-03-01 ~ 2022-03-15`
+> （右端刻意包含公告日，否则 fundamentals 会因 PIT 过滤为空，`data/fundamental/` 就落不下来），
+> 并把时钟固定在 `2022-03-01`（指数成分/行业是**快照累积**，用系统时钟会让快照落在窗口之外）。
 
 ## 与真实数据的差距（必须知道）
 

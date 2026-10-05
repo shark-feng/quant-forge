@@ -29,6 +29,7 @@ from typing import Any, Mapping, Sequence
 import pandas as pd
 
 from tests.compat import raises
+from tests.schema_validator import load_schema, mutation_probe, validate_schema
 from tests.fake_akshare import FIXTURES, FakeAKShareClient
 from tests.tools import PROJECT_ROOT, workspace_tmp
 
@@ -91,99 +92,6 @@ def fixture_root_copy(tmp: Path) -> Path:
     root = tmp / "fixtures"
     shutil.copytree(FIXTURES, root)
     return root
-
-
-def _resolve_ref(root: Mapping[str, Any], ref: str) -> Mapping[str, Any]:
-    """解析 ``#/$defs/name`` 形式的 JSON Pointer（本仓库只用这一种）。"""
-    assert ref.startswith("#/"), f"只支持文档内引用：{ref}"
-    node: Any = root
-    for part in ref[2:].split("/"):
-        node = node[part]
-    return node
-
-
-def _type_ok(instance: Any, expected: Any) -> bool:
-    names = expected if isinstance(expected, list) else [expected]
-    for name in names:
-        if name == "object" and isinstance(instance, dict):
-            return True
-        if name == "array" and isinstance(instance, list):
-            return True
-        if name == "string" and isinstance(instance, str):
-            return True
-        if name == "number" and isinstance(instance, (int, float)) and not isinstance(instance, bool):
-            return True
-        if name == "integer" and isinstance(instance, int) and not isinstance(instance, bool):
-            return True
-        if name == "boolean" and isinstance(instance, bool):
-            return True
-        if name == "null" and instance is None:
-            return True
-    return False
-
-
-def validate_schema(
-    instance: Any, schema: Mapping[str, Any], root: Mapping[str, Any] | None = None, path: str = "$"
-) -> list[str]:
-    """极简 JSON Schema 校验器（**不引入 jsonschema 依赖**）。
-
-    只实现本仓库 schema 用到的子集：``$ref``（``#/`` 指针）/ ``type``（含类型数组）/
-    ``const`` / ``enum`` / ``required`` / ``properties`` / ``patternProperties`` /
-    ``additionalProperties``（bool 或 schema）/ ``items`` / ``minItems`` / ``minProperties`` /
-    ``minimum`` / ``minLength``。返回错误列表（空列表 = 通过）。
-    """
-    document = schema if root is None else root
-    if "$ref" in schema:
-        return validate_schema(instance, _resolve_ref(document, schema["$ref"]), document, path)
-
-    errors: list[str] = []
-    if "const" in schema and instance != schema["const"]:
-        errors.append(f"{path}: 期望常量 {schema['const']!r}，实际 {instance!r}")
-    if "enum" in schema and instance not in schema["enum"]:
-        errors.append(f"{path}: {instance!r} 不在枚举 {schema['enum']}")
-    expected = schema.get("type")
-    if expected is not None and not _type_ok(instance, expected):
-        errors.append(f"{path}: 类型期望 {expected}，实际 {type(instance).__name__}")
-        return errors
-
-    if isinstance(instance, dict):
-        for key in schema.get("required", []):
-            if key not in instance:
-                errors.append(f"{path}: 缺少必需键 {key!r}")
-        properties = schema.get("properties", {})
-        patterns = schema.get("patternProperties", {})
-        additional = schema.get("additionalProperties", True)
-        for key, value in instance.items():
-            if key in properties:
-                errors.extend(validate_schema(value, properties[key], document, f"{path}.{key}"))
-                continue
-            matched = False
-            for pattern, sub in patterns.items():
-                if re.search(pattern, str(key)):
-                    errors.extend(validate_schema(value, sub, document, f"{path}.{key}"))
-                    matched = True
-            if matched:
-                continue
-            if additional is False:
-                errors.append(f"{path}: 多出未声明的键 {key!r}")
-            elif isinstance(additional, dict):
-                errors.extend(validate_schema(value, additional, document, f"{path}.{key}"))
-        if "minProperties" in schema and len(instance) < schema["minProperties"]:
-            errors.append(f"{path}: 属性数 {len(instance)} < minProperties")
-    elif isinstance(instance, list):
-        if "minItems" in schema and len(instance) < schema["minItems"]:
-            errors.append(f"{path}: 元素数 {len(instance)} < minItems {schema['minItems']}")
-        items = schema.get("items")
-        if isinstance(items, dict):
-            for index, value in enumerate(instance):
-                errors.extend(validate_schema(value, items, document, f"{path}[{index}]"))
-    elif isinstance(instance, str):
-        if "minLength" in schema and len(instance) < schema["minLength"]:
-            errors.append(f"{path}: 字符串长度 {len(instance)} < minLength")
-    elif isinstance(instance, (int, float)) and not isinstance(instance, bool):
-        if "minimum" in schema and instance < schema["minimum"]:
-            errors.append(f"{path}: {instance} < minimum {schema['minimum']}")
-    return errors
 
 
 def patch_fixture(root: Path, filename: str, mutate: Any) -> None:

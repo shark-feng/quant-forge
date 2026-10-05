@@ -223,6 +223,21 @@ class DataStore:
         """返回底层行情表（只读用途；请勿修改）。"""
         return self._df
 
+    @property
+    def index_members_frame(self) -> pd.DataFrame | None:
+        """指数成分变更表（canonical，只读用途；无成分时为 ``None``）。
+
+        与 `bars_frame` 同一约定。公开它是因为落盘/报告工具需要成分表本体，
+        而此前只能访问私有 ``_members`` —— 「调用方被迫改用内部路径」正是本项目
+        反复出现的两套入口问题（见 `docs/DEVELOPMENT.md` §3 的单一实现原则）。
+        """
+        return self._members
+
+    @property
+    def fundamentals_frame(self) -> pd.DataFrame | None:
+        """财务表（canonical，只读用途；无财务时为 ``None``）。"""
+        return self._fundamentals
+
     def trading_days(self, start: DateLike | None = None, end: DateLike | None = None) -> list[_date]:
         return self.calendar.sessions(start, end)
 

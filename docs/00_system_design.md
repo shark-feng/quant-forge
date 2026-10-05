@@ -166,19 +166,23 @@ D:\Quantify\
 │   ├── contracts\
 │   │   └── provider_contract.py     ✅ M4-9 四 provider 共用契约（8 项 × 4 实现；自身不被收集）
 │   ├── fixtures\akshare\            ✅ M4-8 离线样例 + README（**手工构造，非真实抓取数据**）
-│   └── test_*.py                    ✅ 55 个（M1~M5 各层 + 19 条缺陷回归 + 工程化/编码/契约/文档数字守护）
-└── tools\                           ✅ 维护脚本（文档数字同步、抓取探测、上传、诊断）
+│   └── test_*.py                    ✅ 57 个（M1~M5 各层 + 19 条缺陷回归 + 工程化/编码/契约/文档数字守护）
+└── tools\                           ✅ 维护脚本（文档数字同步、抓取探测与落盘、上传、诊断）
     ├── sync_doc_counts.py           ✅ 文档数字同步（复用运行器收集逻辑；规则失配即报错）
     ├── probe_akshare.py             ✅ M5-1 AKShare 端点探测（**离线 dry-run 可验收**；产出能力报告）
+    ├── fetch_data.py                ✅ M5-2 抓取并落盘（**复用 ingest_from_provider**；产出四份报告）
     ├── upload_github.ps1            ✅ 宿主机推送脚本（含密钥扫描与非交互保护）
     └── diag_*.py                    ✅ 只读诊断（表格/订单时序/确定性/整手不变量）
 ```
 
-> `reports\`（回测产物，M7 阶段生成）与 `data\cache\`（取数缓存）已 gitignore，故不在树中列出。
-> `docs\data\` 存放探测产物：`probe_report.schema.json`（规格，入库）与
-> `akshare_capability_report.{json,md}`（**真实探测**报告，入库）；
-> dry-run 的产物落在 `docs\data\dry-run\` 且**已 gitignore**（假数据不得当结论）。
-> M5 阶段 B 将新增 `tools\fetch_data.py`（真实抓取）。
+> `reports\`（回测与抓取产物，可复现）与 `data\cache\`（取数缓存）已 gitignore，故不在树中列出：
+> 抓取产物固定落在 `reports\fetch\<run_id>\`（四份：`summary.json` / `quality_report.json` /
+> `manifest.json` / `report.md`），数据落在 `data\raw\<symbol>.parquet` +
+> `data\index\index_members.parquet` + `data\fundamental\fundamentals.parquet`。
+> `docs\data\` 存放**报告契约与探测产物**：`probe_report.schema.json`、`fetch_summary.schema.json`
+> （规格，入库）与 `akshare_capability_report.{json,md}`（**真实探测**报告，入库）；
+> dry-run 的产物落在 `docs\data\dry-run\` 与 `reports\fetch\dry-run\`，且**已 gitignore**
+> （假数据不得当结论）。
 
 ---
 
@@ -346,7 +350,7 @@ for d in trading_days:
 | R3  | M2 引擎骨架（事件/循环/撮合/成本/账务/T+1）+ 单测           | ✅ 已交付     |
 | R4  | M3 策略层（指标库/均线交叉/价格突破/成交量配合/注册表）+ 单测       | ✅ 已交付     |
 | R5  | M4 组合层（等权/单票上限/最大持仓/现金管理/凯利）+ M5 风控 RMS（13 条规则/VaR/验收指标）+ 引擎接入 | ✅ 已交付 |
-| —   | 合计 808 个单元测试用例全部通过（零依赖运行器 / pytest 双兼容）   | ✅       |
+| —   | 合计 836 个单元测试用例全部通过（零依赖运行器 / pytest 双兼容）   | ✅       |
 | R6  | M6 评价层 + M7 报告层，输出第一份完整回测报告               | ⏭ 待确认后开工 |
 | R7  | 偏差与压力测试套件（未来函数/幸存者/过拟合/成本敏感性/极端行情）        | ⏭        |
 | R8+ | 第二阶段：多因子/优化/GARCH/协整                      | ⏭        |

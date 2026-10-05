@@ -36,7 +36,7 @@
 | R2-08 | 偏差与压力测试套件 | ⏳ 待设计 |
 | R2-09 | 第二阶段设计（多因子 / 优化 / GARCH / 协整） | ⏳ 待设计 |
 
-测试：**808 个单元测试用例**（55 个测试模块）。
+测试：**836 个单元测试用例**（57 个测试模块）。
 
 > 这一行的两个数字由 `tools/sync_doc_counts.py` **自动同步**，并由
 > `tests/test_defect_11_docs_consistency.py` 的红灯守护（手改无效、过期即失败），
@@ -135,24 +135,44 @@ python tools\probe_akshare.py --out reports\_probe
 > 想量耗时中位数用 `--repeats 3`（默认 1 次，避免触发对端限流）。
 > 报告里记的 `cwd` 与命令**假设在项目根执行**（相对路径如 `reports\_probe` 以此为基准）。
 
-### 3. 抓取数据到本地缓存
+### 3. 抓取数据并落盘
+
+`fetch_data.py` 只做四件事：**解析股票池 → 落盘 → 出报告 → 定退出码**；
+取数流程完全复用 M4 的 `ingest_from_provider`（九步：日历 → 成分 → 元信息 → 行情 →
+财务 → 行业 → 归一 → 校验 → 建 store）。
 
 ```powershell
-# 全量抓取（首次；耗时较长，受速率限制）
-python tools\fetch_data.py --start 2020-01-01 --end 2025-12-31
+# 首次抓取：以沪深300成分为候选池，抓 2020-01-01 ~ 2025-12-31（受速率限制，耗时较长）
+python tools\fetch_data.py --start 2020-01-01 --end 2025-12-31 --index 000300.SH
 
-# 增量更新（只补缺失区间）
-python tools\fetch_data.py --start 2025-01-01 --end 2025-12-31 --incremental
+# 增量续抓：同一条命令即可（缓存优先，只补缺口）；--incremental 是它的显式写法
+python tools\fetch_data.py --start 2025-01-01 --end 2025-12-31 --index 000300.SH --incremental
+
+# 先小样本试跑（例如 50 只；取排序后的前 N 个，确定性）
+python tools\fetch_data.py --start 2024-01-01 --end 2024-12-31 --index 000300.SH --max-symbols 50
+
+# 也可直接给标的（与 --index 成分取并集）
+python tools\fetch_data.py --start 2024-01-01 --end 2024-12-31 --symbols 600000,000001
 ```
 
-- 缓存位置：`data/cache/`（Parquet + manifest，**已 gitignore**）；
-- 限流：令牌桶 + 指数退避重试（`data/ratelimit.py`）；
-- 失败降级：单接口失败不影响其它接口，缺失项写入质量报告。
+- **落盘**：`data/raw/<symbol>.parquet`（一标的一文件，canonical，含 `close_adj`）
+  \+ `data/index/index_members.parquet` + `data/fundamental/fundamentals.parquet`
+  （回读方式写在报告的 `artifacts.provider_for_readback` 里，直接用 `provider=parquet` 即可）；
+- **缓存**：`data/cache/`（Parquet + manifest，**已 gitignore**）——断点续抓靠它，不靠"记住进度"；
+- **`--refresh` 是整体替换**：先清空数据目录（跨格式）再全量写，与增量语义互斥（同传即报错）；
+- **四份产物**在 `reports\fetch\<run_id>\`：
+  `summary.json`（机器读）/ `quality_report.json` / `manifest.json` / `report.md`（人读）；
+- **退出码**：必需步骤失败或质量报告有 error → **2**（报告仍写出）；降级 → 0（`--fail-on-degraded` 可改成 2）；
+- **离线自检**：`python tools\fetch_data.py --dry-run`（不联网、不装 akshare、退出码恒 0；
+  产物落在 `<--out>\dry-run\`，**永不触碰** `data/raw` 与 `data/cache`）。
 
 ### 4. 数据质量报告（Q1~Q12）
 
-```powershell
-python tools\fetch_data.py --report reports\_probe\data_quality.json
+质量报告是抓取的**副产品**，不需要单独命令：
+
+```
+reports\fetch\<run_id>\quality_report.json   ← 机器读：Q1~Q12 + 取数层降级披露（编码 I1）
+reports\fetch\<run_id>\report.md             ← 人读：同一份质量明细 + 计数 + 每步耗时 + 本次增量
 ```
 
 重点检查项（`docs/11` §7）：
@@ -194,7 +214,7 @@ src/aqs/
   strategy/         指标库 + 均线交叉/价格突破/成交量配合 + 配置驱动注册表
   portfolio/        仓位计算（等权/凯利）+ 目标权重组合 + 注册表
   risk/             规则引擎 + 13 条风控规则 + VaR/ES + 验收指标
-tests/              单元测试（808 个用例）
+tests/              单元测试（836 个用例）
 tools/              诊断与数据工具（口径体检 / 订单时间线 / 确定性比对 / AKShare 探测与抓取）
 LICENSE             MIT
 NOTICE              第三方署名、依赖清单、合规声明
