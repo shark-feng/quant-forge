@@ -13,8 +13,8 @@
 | 项目 | 结果 |
 | --- | --- |
 | 测试运行方式 | `python tests/run_tests.py`（零依赖运行器，与 pytest 双兼容） |
-| 用例总数 | **805** |
-| 本机实测结果 | 通过 **803** / 跳过 **2** / 失败 0（pytest 侧 `803 passed, 2 skipped`，逐项一致） |
+| 用例总数 | **808** |
+| 本机实测结果 | 通过 **806** / 跳过 **2** / 失败 0（pytest 侧 `806 passed, 2 skipped`，逐项一致） |
 | 测试模块 | 55 个 |
 | 代码规模 | `src/aqs` 46 个文件约 9.0k 行；`tests` 41 个文件约 6.5k 行 |
 
@@ -85,14 +85,14 @@
 | `test_packaging.py` | 23 | **M2 工程化**：许可证一致、依赖分组一致、`.gitignore`/`.gitattributes` 覆盖度、**禁止第三方回测框架进依赖**、上传脚本健壮性、README 链接与 AKShare runbook |
 | `test_provider_config.py` | 7 | **M4-1** 取数行为配置：缓存/限流/重试/单位换算的默认值、`base.yaml` 携带、非法值报错、overlay 可达 |
 | `test_provider_abstraction.py` | 8 | **M4-2** 数据源抽象：能力**显式声明**与缺失判定、溯源结构、降级披露文本、协议可判定 |
-| `test_data_cache.py` | 14 | **M4-3** 本地缓存：参数哈希（**不含日期区间**）、schema 版本隔离、TTL 四态判定、增量合并**不丢数据**、manifest、原子写入、key 越界防护 |
+| `test_data_cache.py` | 15 | **M4-3** 本地缓存：参数哈希（**不含日期区间**）、schema 版本隔离、TTL 四态判定、增量合并**不丢数据**、manifest、原子写入、key 越界防护 |
 | `test_ratelimit.py` | 15 | **M4-4** 限流与重试：令牌桶（时钟/睡眠可注入）、指数退避+抖动、**空结果默认不重试**、不可重试异常直抛 |
 | `test_data_quality.py` | 20 | **M4-5** 质量检查 Q1~Q12（含 **Q3 手/股量级**、**Q12 幸存者偏差自检**）、阈值可配、报告结构与退出码、纯函数不改输入 |
 | `test_provider_implementations.py` | 10 | **M4-6** synthetic/CSV/Parquet 三实现：能力**由实际列推断**、指数成分**区间相交**过滤（正反例）、**「未知标的→空表+warning」与「源不可用→仍报错」的区分**、pyarrow 环境门控 |
 | `test_provider_registry.py` | 13 | **M4-7** 注册表：未知名报错**不回退**、重名需显式 overwrite、构建期协议闸门、配置层与运行层分工、能力查询 strict/degraded、root 解析口径 |
-| `test_akshare_provider.py` | 23 | **M4-8** AKShare 映射骨架（全离线）：**手→股**单位换算、代码归一与非法值报错、复权因子归一（缺失不猜测）、上市日缺失报错、公告日缺失丢行、**快照累积区间闭合/同日幂等**、缓存命中不发请求 / 增量收窄 / 降级回退、重试与失败比例升级、进度审计、能力如实声明（`index_members=False`） |
+| `test_akshare_provider.py` | 24 | **M4-8** AKShare 映射骨架（全离线）：**手→股**单位换算、代码归一与非法值报错、复权因子归一（缺失不猜测）、上市日缺失报错、公告日缺失丢行、**快照累积区间闭合/同日幂等**、缓存命中不发请求 / 增量收窄 / 降级回退、重试与失败比例升级、进度审计、能力如实声明（`index_members=False`） |
 | `test_provider_contract.py` | 32 | **M4-9 契约**：4 个 provider × 8 项检查（能力声明↔实际行为 / `missing_required` 边界 / 降级披露自洽 / **成分窗口区间相交** / 字段规范 / 主键唯一 / PIT 列与区间 / `Provenance` 契约）；检查项定义在 mixin 里由子类继承，**由运行器统一收集** |
-| `test_ingest.py` | 15 | **M4-10 适配层**：九步流程与 `step_status` 取值域、`skipped` 仅表示「用户没请求」、可选数据失败**不中止**（`fallback`→degraded / `fail`→failed）、必需步骤失败中止并带步态、上市日策略 strict/proxy 两态、成分缺失的 fallback 开/关两态、**校验错误影响步态 + `has_errors`**、近似披露进 diagnostics 与 quality、D4 口径逐条披露、manifest 空值有解释、**与旧入口 `load_market_data` 的内部状态一致** |
+| `test_ingest.py` | 16 | **M4-10 适配层**：九步流程与 `step_status` 取值域、`skipped` 仅表示「用户没请求」、可选数据失败**不中止**（`fallback`→degraded / `fail`→failed）、必需步骤失败中止并带步态、上市日策略 strict/proxy 两态、成分缺失的 fallback 开/关两态、**校验错误影响步态 + `has_errors`**、近似披露进 diagnostics 与 quality、D4 口径逐条披露、manifest 空值有解释、**与旧入口 `load_market_data` 的内部状态一致** |
 | `test_synthetic_parameters.py` | 8 | **V2 参数路径**：合成数据的标的属性/价格路径/财务数据都按**标的序号**取随机流（截断标的数或改变顺序都不改变已有标的的序列），并守住空标的与重复标的必须报错 |
 | `test_skip_semantics.py` | 1 | **V4 纪律探针**：一个**故意跳过**的用例，用于在两种运行器下都验证「`compat.skip` 计为 skip 而非通过」（子进程守护见 `test_defect_10_*`） |
 | `test_probe_akshare.py` | 21 | **M5-1** AKShare 端点探测工具（全离线 dry-run）：单位量级判定（手/元 正例、股/元 反例、缺列→未知且禁止上线）、**公告日缺失即「M6 的 PIT 因子做不了」**、`mapper_check` 只读（入参深比较 + 禁止 `open`）、观测能力与建议由证据推导、单端点失败不中止、**akshare 缺失 → 全 not_found + 退出码 2 + 说明原因**、状态词表与分页签名分析、CLI 与 GBK 控制台可打印、md/json 状态一致、**探测与 provider 的调用参数逐条一致**、**`--fixture-root` 在 live 模式被拒且拒绝发生在任何调用之前**、**`--end`/`--report-period` 的解析口径与来源标注**（≤ end 的最近**已过**季末）、**JSON Schema 的 `additionalProperties`/`required`/`type` 真的被执行**（9 种伪造全部拒绝 + 动态端点名的反向对照）、**公开参数构造无死参数**（`adjust` 由 dataset 派生）、**「查谁」按端点语义分派** |
@@ -383,7 +383,7 @@ volume `{industry_exposure:26, max_position_per_symbol:18}`。
 | M2 工程化 | 文件全部交付；**推送由宿主机执行** |
 | **M4 取数层** | **M4-1~M4-10 全部交付**（`102fb3e`…`905dae4`）：抽象 / 缓存 / 限流 / 质量 / 三实现 + AKShare 骨架 / 注册表 / 适配层；成文见 `docs/14_provider_layer.md` |
 | **M4 契约测试** | **4 provider × 8 项 = 32 条**（含区间相交的正反例） |
-| 测试 | **收集 805 个用例**（55 个模块；第一轮 398 → 本轮 805） |
+| 测试 | **收集 808 个用例**（55 个模块；第一轮 398 → 本轮 808） |
 | 新增机械守护 | 整手不变量 / 跨进程确定性 / 乱码编码 / 工程化一致性 / 文档数字一致性 / **收集规则一致性（运行器↔pytest↔unittest）** |
 
 ### 11.1 「不报错、只让结果悄悄失真」类缺陷清单（按三种类型归类）

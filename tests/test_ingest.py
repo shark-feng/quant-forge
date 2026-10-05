@@ -177,6 +177,25 @@ def test_synthetic_ingest_builds_usable_store_and_full_report():
     assert report.diagnostics["provider"] == "synthetic"
 
 
+def test_ingest_records_per_step_seconds():
+    """每步耗时（M5-2 补充 4）：真实抓取可能跑几十分钟，诊断需要看到瓶颈在哪一步。
+
+    口径：``step_seconds`` 是**该步独占**耗时；键集是 `INGEST_STEPS` 的子集
+    （失败中止时不完整，调用方不得补零冒充完整）。
+    """
+    report = ingest(synthetic_provider())
+
+    assert set(report.step_seconds) <= set(INGEST_STEPS)
+    assert report.step_seconds, "正常完成后必须记录每步耗时"
+    assert all(value >= 0 for value in report.step_seconds.values())
+    assert "bars" in report.step_seconds and "store" in report.step_seconds
+    # to_dict 必须带上（报告层要用），且是**拷贝**（改它不影响报告对象）
+    payload = report.to_dict()["step_seconds"]
+    assert payload == report.step_seconds
+    payload["bars"] = -1.0
+    assert report.step_seconds["bars"] >= 0, "to_dict 必须返回副本，不得暴露内部字典"
+
+
 def test_csv_ingest_reports_each_step():
     with workspace_tmp("ingest_csv") as root:
         report = ingest(csv_provider(root), universe=UniverseConfig(mode="index"))

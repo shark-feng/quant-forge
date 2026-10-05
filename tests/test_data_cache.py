@@ -312,3 +312,45 @@ def test_cache_key_is_sanitised_against_path_traversal():
         path = cache.path_for("bars", "../../etc/passwd")
         assert ".." not in str(path.relative_to(root))
         assert path.parent == root / "bars"
+
+
+# --------------------------------------------------------------------------- #
+# M5-2：原子写提升为公开入口（缓存与 data/raw 落盘共用同一实现）
+# --------------------------------------------------------------------------- #
+def test_atomic_write_frame_and_text_are_public_and_leak_free():
+    """公开原子写的两条硬性质：① 内容正确；② **失败不留半截文件**。
+
+    第 ② 条是关键：写坏的行情文件会被下游当完整数据读进去，而且**不报错**。
+    """
+    from aqs.data.cache import atomic_write_frame, atomic_write_text
+
+    frame = pd.DataFrame({"date": pd.bdate_range("2022-03-01", periods=3), "close": [1.0, 2.0, 3.0]})
+    with workspace_tmp("atomic_write") as root:
+        target_dir = root / "nested" / "raw"          # 目录不存在也要能写（自动创建）
+        for fmt in ("parquet", "csv"):
+            path = atomic_write_frame(target_dir / f"600000.SH.{fmt}", frame, fmt=fmt)
+            assert path.exists() and path.parent == target_dir
+            back = pd.read_parquet(path) if fmt == "parquet" else pd.read_csv(path)
+            assert list(back["close"]) == [1.0, 2.0, 3.0]
+
+        text_path = atomic_write_text(target_dir / "summary.json", '{"a": 1}\n')
+        assert text_path.read_text(encoding="utf-8") == '{"a": 1}\n'
+        # 换行统一为 LF（Windows 上默认 newline 会写 CRLF，与 .gitattributes 冲突）
+        assert b"\r\n" not in text_path.read_bytes()
+
+        with raises(ValueError):
+            atomic_write_frame(target_dir / "bad.feather", frame, fmt="feather")
+
+        # 失败注入：writer 抛错 → 目标文件不存在，且不留 .tmp 残渣
+        from aqs.data import cache as cache_module
+
+        bad_target = target_dir / "broken.parquet"
+
+        def boom(_path):
+            raise OSError("注入的写盘故障")
+
+        with raises(OSError):
+            cache_module._atomic_replace(bad_target, boom)
+        assert not bad_target.exists()
+        leftovers = [p.name for p in target_dir.iterdir() if p.suffix == ".parquet" and "broken" in p.name]
+        assert leftovers == []

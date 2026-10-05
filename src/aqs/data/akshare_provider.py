@@ -62,6 +62,7 @@ __all__ = [
     "Endpoint",
     "AKShareProvider",
     "client_kwargs_for",
+    "fetch_adjust_for",
     "normalize_akshare_symbol",
     "derive_adj_factor",
     "report_periods_for_range",
@@ -647,6 +648,20 @@ def report_periods_for_range(start: DateLike, end: DateLike, *, lookback_days: i
 # --------------------------------------------------------------------------- #
 # 端点 → 客户端调用参数（**公开**：provider 与探测工具共用同一实现）
 # --------------------------------------------------------------------------- #
+def fetch_adjust_for(ep: Endpoint) -> str:
+    """该端点的**抓取口径**复权参数：``bars_hfq`` → ``"hfq"``，其余 → ``""``。
+
+    **单一出处**：请求参数（`client_kwargs_for`）、缓存 key 后缀（`_cache_key`）与
+    缓存口径参数（`_cache_params`）三处都取自这里。
+
+    为什么必须是派生值、而不是把调用方的 ``data.adjustment`` 透传下来：
+    ``fetch_bars(adjust="hfq")`` 会同时取 ``bars_raw``（**不复权**）与 ``bars_hfq``，
+    若把请求口径写进 ``bars_raw`` 的缓存参数，同一份不复权数据就会被算成两份参数 ——
+    切换 ``data.adjustment`` 会让 ``bars`` 缓存莫名 miss 并重抓（**不报错，只白花配额**）。
+    """
+    return "hfq" if ep.dataset == "bars_hfq" else ""
+
+
 def client_kwargs_for(
     ep: Endpoint,
     *,
@@ -687,7 +702,7 @@ def client_kwargs_for(
             "period": "daily",
             "start_date": pd.Timestamp(start).strftime("%Y%m%d"),
             "end_date": pd.Timestamp(end).strftime("%Y%m%d"),
-            "adjust": "hfq" if ep.dataset == "bars_hfq" else "",
+            "adjust": fetch_adjust_for(ep),
         }
     if ep.fn == "stock_individual_info_em":
         return {"symbol": str(symbol).split(".")[0]}
@@ -940,11 +955,12 @@ class AKShareProvider:
     # ------------------------------------------------------------------ #
     # 缓存 key / 参数哈希
     # ------------------------------------------------------------------ #
-    def _cache_key(self, endpoint: str, *, symbol: str | None = None, adjust: str = "",
+    def _cache_key(self, endpoint: str, *, symbol: str | None = None,
                    report_period: DateLike | None = None, industry_name: str | None = None) -> str:
         ep = ENDPOINTS[endpoint]
         if ep.key_kind == "symbol_adjust":
-            return f"{symbol}_{adjust or 'raw'}"
+            # 口径后缀取**抓取口径**（派生值），不透传调用方的 data.adjustment
+            return f"{symbol}_{fetch_adjust_for(ep) or 'raw'}"
         if ep.key_kind == "symbol":
             return str(symbol)
         if ep.key_kind == "report_period":
@@ -953,14 +969,19 @@ class AKShareProvider:
             return str(industry_name)
         return "all"
 
-    def _cache_params(self, endpoint: str, *, adjust: str = "") -> dict[str, Any]:
-        """口径类参数（**不含日期区间**，否则增量永远失效）。"""
+    def _cache_params(self, endpoint: str) -> dict[str, Any]:
+        """口径类参数（**不含日期区间**，否则增量永远失效）。
+
+        ``adjust`` 取**抓取口径**（`fetch_adjust_for`）：``bars_raw`` 永远是 ``""``。
+        曾误取请求口径（``fetch_bars`` 把 ``data.adjustment`` 透传进来），
+        导致同一份不复权数据被算成两份参数、切换配置就让缓存莫名 miss。
+        """
         ep = ENDPOINTS[endpoint]
         return {
             "endpoint": endpoint,
             "fn": ep.fn,
             "mapper": ep.mapper,
-            "adjust": adjust,
+            "adjust": fetch_adjust_for(ep),
             "volume_to_shares": _DEFAULT_VOLUME_TO_SHARES,
             "member_columns": list(INDEX_MEMBER_COLUMNS) if ep.dataset == "index_members" else None,
         }
@@ -975,7 +996,6 @@ class AKShareProvider:
         symbol: str | None = None,
         start: DateLike | None = None,
         end: DateLike | None = None,
-        adjust: str = "",
         report_period: DateLike | None = None,
         industry_name: str | None = None,
         snapshot_date: DateLike | None = None,
@@ -995,10 +1015,9 @@ class AKShareProvider:
         ep = ENDPOINTS[endpoint]
         warnings = warnings if warnings is not None else []
         key = self._cache_key(
-            endpoint, symbol=symbol, adjust=adjust, report_period=report_period,
-            industry_name=industry_name,
+            endpoint, symbol=symbol, report_period=report_period, industry_name=industry_name,
         )
-        params = self._cache_params(endpoint, adjust=adjust)
+        params = self._cache_params(endpoint)
 
         stale: pd.DataFrame | None = None
         last_fetched: str | None = None
@@ -1227,11 +1246,11 @@ class AKShareProvider:
         for index, symbol in enumerate(wanted, start=1):
             try:
                 frame = self._call(
-                    "bars_raw", symbol=symbol, start=start, end=end, adjust=mode, warnings=warnings
+                    "bars_raw", symbol=symbol, start=start, end=end, warnings=warnings
                 )
                 if mode == "hfq":
                     hfq = self._call(
-                        "bars_hfq", symbol=symbol, start=start, end=end, adjust=mode, warnings=warnings
+                        "bars_hfq", symbol=symbol, start=start, end=end, warnings=warnings
                     )
                     frame = derive_adj_factor(frame, hfq)
                     for note in frame.attrs.get("warnings", ()):

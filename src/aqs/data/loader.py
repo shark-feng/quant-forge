@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, Sequence, runtime_checkable
@@ -347,6 +348,8 @@ class IngestReport:
     degradation_notes: tuple[str, ...]
     manifest: list[CacheMeta]
     diagnostics: dict[str, Any] = field(default_factory=dict)
+    step_seconds: dict[str, float] = field(default_factory=dict)
+    """每步**独占**耗时（秒）。失败中止时可能不完整（只含已完成的步骤）。"""
 
     # ------------------------------------------------------------------ #
     @property
@@ -371,6 +374,7 @@ class IngestReport:
             "overall_status": self.overall_status,
             "has_errors": self.has_errors,
             "step_status": dict(self.step_status),
+            "step_seconds": dict(self.step_seconds),
             "degradation_notes": list(self.degradation_notes),
             "quality": self.quality.to_dict(),
             "manifest_rows": len(self.manifest),
@@ -516,6 +520,18 @@ def ingest_from_provider(
     provenance: dict[str, Provenance] = {}
     diagnostics: dict[str, Any] = {"provider": provider.name}
 
+    # 每步**独占**耗时：真实抓取可能跑几十分钟，用户需要看到瓶颈在哪一步
+    # （例如「bars 用了 38 分钟」）。只加计时，不改任何控制流；
+    # 失败中止时 timings 不完整，调用方据此如实呈现，不得补零冒充完整。
+    timings: dict[str, float] = {}
+    _last_mark = time.perf_counter()
+
+    def _mark(step: str) -> None:
+        nonlocal _last_mark
+        now = time.perf_counter()
+        timings[step] = round(now - _last_mark, 3)
+        _last_mark = now
+
     # ---------------- ① 交易日历 ----------------
     days, cal_prov = provider.fetch_trading_calendar(start, end)
     provenance["calendar"] = cal_prov
@@ -526,6 +542,8 @@ def ingest_from_provider(
         steps["calendar"] = "degraded"
         calendar = None
         notes.append("交易日历为空（provider 未提供）→ 由行情日期派生（calendar.source=derived）")
+
+    _mark("calendar")
 
     # ---------------- ② 指数历史成分（并集 → 候选池） ----------------
     member_frames: list[pd.DataFrame] = []
@@ -572,6 +590,8 @@ def ingest_from_provider(
                 "universe.fallback_to_all=False 时不允许退化（避免幸存者偏差被静默掩盖）"
             )
 
+    _mark("index_members")
+
     # ---------------- 候选标的 ----------------
     candidate: list[str] | None = list(symbols) if symbols else None
     if candidate is None:
@@ -615,6 +635,8 @@ def ingest_from_provider(
                 for warning in meta_prov.warnings:
                     notes.append(f"symbol_meta：{warning}")
 
+    _mark("symbol_meta")
+
     # ---------------- ④ 行情 ----------------
     try:
         bars, bars_prov = provider.fetch_bars(candidate or [], start, end, adjust=cfg.adjustment)
@@ -632,6 +654,8 @@ def ingest_from_provider(
     steps["bars"] = "degraded" if bars_prov.warnings else "ok"
     for warning in bars_prov.warnings:
         notes.append(f"bars：{warning}")
+
+    _mark("bars")
 
     # ---------------- ⑤ 财务（可选） ----------------
     if not fundamentals:
@@ -653,6 +677,8 @@ def ingest_from_provider(
         else None
     )
 
+    _mark("fundamentals")
+
     # ---------------- ⑥ 行业（可选） ----------------
     if not industry:
         steps["industry"] = "skipped"
@@ -668,6 +694,8 @@ def ingest_from_provider(
             provenance=provenance,
         )
 
+    _mark("industry")
+
     # ---------------- ⑦ 归一 ----------------
     bars_norm, attached = _attach_static_columns(bars, meta if meta is not None else pd.DataFrame())
     if industry_raw is not None and len(industry_raw):
@@ -682,6 +710,8 @@ def ingest_from_provider(
         "symbols": int(bars_norm["symbol"].nunique()),
         "attached_columns": sorted(set(attached)),
     }
+
+    _mark("normalize")
 
     # ---------------- ⑧ 校验 ----------------
     validate_report: DataQualityReport = validate_bars(
@@ -703,6 +733,8 @@ def ingest_from_provider(
     else:
         steps["validate"] = "ok"
 
+    _mark("validate")
+
     # ---------------- ⑨ 构建 store（store 内部会再校验一次并保留自己的报告） ----------------
     calendar_arg = calendar
     if calendar_arg is None:
@@ -719,6 +751,8 @@ def ingest_from_provider(
     )
     steps["store"] = "ok"
     diagnostics["store_quality"] = store.quality
+
+    _mark("store")
 
     # ---------------- 质量报告（Q1~Q12 + 取数层披露） ----------------
     quality = QualityChecker().run_all(
@@ -769,4 +803,5 @@ def ingest_from_provider(
         degradation_notes=tuple(dict.fromkeys(notes)),
         manifest=manifest,
         diagnostics=diagnostics,
+        step_seconds=timings,
     )

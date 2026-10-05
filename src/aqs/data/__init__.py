@@ -10,7 +10,14 @@
 
 from __future__ import annotations
 
-from .cache import CacheLookup, CacheMeta, DataCache, parquet_available
+from .cache import (
+    CacheLookup,
+    CacheMeta,
+    DataCache,
+    atomic_write_frame,
+    atomic_write_text,
+    parquet_available,
+)
 from .akshare_provider import AKShareProvider
 from .file_provider import CsvProvider, FileProvider, ParquetProvider
 from .loader import (
@@ -86,6 +93,9 @@ __all__ = [
     "CacheMeta",
     "CacheLookup",
     "parquet_available",
+    # 原子写（M5-2 提升为公开）：缓存与 data/raw 落盘共用同一实现
+    "atomic_write_frame",
+    "atomic_write_text",
     # ---- 限流与重试（M4-4）----
     "RateLimiter",
     "retry_call",

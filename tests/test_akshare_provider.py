@@ -641,3 +641,46 @@ def test_fixtures_are_documented_as_synthetic_samples():
     assert "手工构造" in text and "不是" in text, "必须明确声明样例不是真实抓取数据"
     assert "probe_akshare" in text, "必须指向探测脚本（真实字段名由它固化）"
     assert len(list(FIXTURES.glob("*.csv"))) >= 9, "样例文件数量与文档清单需一致"
+
+
+def test_cache_params_use_fetch_adjust_not_requested_adjust():
+    """缓存 key/参数里的 ``adjust`` 必须是**抓取口径**（M5-1 遗留，M5-2 修复）。
+
+    背景：``fetch_bars(adjust="hfq")`` 会同时取 ``bars_raw``（**不复权**）与 ``bars_hfq``。
+    若把请求口径透传进 ``bars_raw`` 的缓存参数，同一份不复权数据会被算成两份参数 ——
+    切换 ``data.adjustment`` 就让 ``bars`` 缓存莫名 miss 并重抓（不报错，只白花配额）。
+    """
+    from aqs.data.akshare_provider import fetch_adjust_for
+
+    with workspace_tmp("ak_adjust_params") as tmp:
+        # ① 同一份数据（未改 adjustment）两次请求：第二次必须走缓存，不再发请求
+        client = FakeAKShareClient()
+        provider = make_provider(tmp, client=client)
+        first, _ = provider.fetch_bars(["600000"], START, END)
+        calls_after_first = client.call_count("stock_zh_a_hist")
+        second, _ = provider.fetch_bars(["600000"], START, END)
+        assert client.call_count("stock_zh_a_hist") == calls_after_first, "同一份数据不应重复抓取"
+        assert second.equals(first)
+
+        # ② 改 data.adjustment（hfq → none）后，bars_raw 仍应命中（抓的就是不复权）
+        narrowed = build_akshare(
+            tmp,
+            client=client,
+            config=DataConfig(provider="akshare", adjustment="none"),
+        )
+        _, prov = narrowed.fetch_bars(["600000"], START, END)
+        assert client.call_count("stock_zh_a_hist") == calls_after_first, (
+            "改 data.adjustment 不该让 bars_raw 缓存失效（它抓的永远是不复权数据）"
+        )
+        assert prov.cache_hit is True
+
+        # ③ 口径来源必须与请求参数一致（单一出处，不允许两处各写一份）
+        assert fetch_adjust_for(ENDPOINTS["bars_raw"]) == ""
+        assert fetch_adjust_for(ENDPOINTS["bars_hfq"]) == "hfq"
+        raw_params = provider._cache_params("bars_raw")
+        hfq_params = provider._cache_params("bars_hfq")
+        assert raw_params["adjust"] == ""
+        assert hfq_params["adjust"] == "hfq"
+        assert raw_params["adjust"] == client.calls[0][1]["adjust"], (
+            "缓存参数里的 adjust 必须等于真实发出的请求参数（否则又是两套口径）"
+        )

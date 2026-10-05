@@ -27,7 +27,14 @@ import pandas as pd
 
 from ..core.logging import get_logger
 
-__all__ = ["CacheMeta", "CacheLookup", "DataCache", "parquet_available"]
+__all__ = [
+    "CacheMeta",
+    "CacheLookup",
+    "DataCache",
+    "atomic_write_frame",
+    "atomic_write_text",
+    "parquet_available",
+]
 
 logger = get_logger("data.cache")
 
@@ -222,7 +229,7 @@ class DataCache:
         self.root.mkdir(parents=True, exist_ok=True)
         entries = {k: v.as_dict() for k, v in (self._manifest_cache or {}).items()}
         payload = {"schema_version": self.version, "entries": entries}
-        _atomic_write_text(
+        atomic_write_text(
             self.manifest_path, json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
         )
 
@@ -390,10 +397,8 @@ class DataCache:
     # ------------------------------------------------------------------ #
     @staticmethod
     def _dump(frame: pd.DataFrame, path: Path, fmt: str) -> None:
-        if fmt == "parquet":
-            _atomic_write(frame, path, lambda p: frame.to_parquet(p, index=False))
-        else:
-            _atomic_write(frame, path, lambda p: frame.to_csv(p, index=False, encoding="utf-8-sig"))
+        # 委托公开的原子写：缓存与 data/raw 落盘共用同一实现（单一出处）
+        atomic_write_frame(path, frame, fmt=fmt)
 
     @staticmethod
     def _load(path: Path, fmt: str) -> pd.DataFrame:
@@ -415,9 +420,10 @@ def _warn_parquet_once() -> None:
         _warned_no_parquet = True
 
 
-def _atomic_write(frame: pd.DataFrame, path: Path, writer: Any) -> None:
-    """临时文件 + 原子替换，避免中断留下半截文件。"""
-    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), suffix=path.suffix)
+def _atomic_replace(path: Path, writer: Any) -> None:
+    """临时文件 + 原子替换，避免中断留下半截文件（内部实现）。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), suffix=path.suffix or ".tmp")
     os.close(fd)
     tmp = Path(tmp_name)
     try:
@@ -428,17 +434,40 @@ def _atomic_write(frame: pd.DataFrame, path: Path, writer: Any) -> None:
             tmp.unlink(missing_ok=True)
 
 
-def _atomic_write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+def atomic_write_frame(path: str | Path, frame: pd.DataFrame, *, fmt: str = "parquet") -> Path:
+    """原子写表格（临时文件 + ``os.replace``），返回写入路径。
+
+    **公开入口**：缓存层与 `tools/fetch_data.py` 落盘 `data/raw` 共用同一实现 ——
+    「写一半被中断」的数据文件会被下游当成完整数据读进去，而且**不报错**，
+    所以原子写必须是一处实现、两处复用（而不是各写一份）。
+
+    ``fmt``：``parquet``（需 pyarrow）或 ``csv``（``utf-8-sig``，与 `DataCache` 一致）。
+    目录不存在会自动创建；写入过程中任何异常都不会留下目标文件。
+    """
+    target = Path(path)
+    if fmt == "parquet":
+        _atomic_replace(target, lambda p: frame.to_parquet(p, index=False))
+    elif fmt == "csv":
+        _atomic_replace(target, lambda p: frame.to_csv(p, index=False, encoding="utf-8-sig"))
+    else:
+        raise ValueError(f"fmt 只能是 ('parquet', 'csv')，收到 {fmt!r}")
+    return target
+
+
+def atomic_write_text(path: str | Path, text: str) -> Path:
+    """原子写文本（UTF-8、LF、``newline="\\n"``），返回写入路径。"""
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=str(target.parent), suffix=".tmp")
     tmp = Path(tmp_name)
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(text)
-        os.replace(tmp, path)
+        os.replace(tmp, target)
     finally:
         if tmp.exists():  # pragma: no cover
             tmp.unlink(missing_ok=True)
+    return target
 
 
 def _infer(frame: pd.DataFrame, columns: Sequence[str]) -> str | None:
