@@ -1,0 +1,269 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shark-feng/quant-forge/docs/data/probe_report.schema.json",
+  "title": "AKShare 端点探测报告（tools/probe_akshare.py 的 JSON 产物）",
+  "description": "M5-1 的机器可读产物格式。tests/test_probe_akshare.py 用轻量校验器（不引入 jsonschema 依赖）逐次校验本 schema，schema 与代码漂移即红灯。",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "probed_at",
+    "mode",
+    "akshare_version",
+    "command",
+    "invocation",
+    "out",
+    "context",
+    "client",
+    "rate_limit",
+    "status_vocabulary",
+    "endpoints",
+    "capabilities_observed",
+    "recommendations",
+    "limitations"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "probed_at": { "type": "string", "minLength": 1 },
+    "mode": { "enum": ["dry-run", "live"] },
+    "akshare_version": { "type": ["string", "null"] },
+    "command": { "type": "string", "minLength": 1 },
+    "invocation": {
+      "type": "object",
+      "required": ["argv", "command", "cwd", "python", "git"],
+      "properties": {
+        "argv": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "command": { "type": "string" },
+        "cwd": { "type": "string" },
+        "python": { "type": "string" },
+        "git": { "type": "object" }
+      }
+    },
+    "out": { "type": "string", "minLength": 1 },
+    "context": {
+      "type": "object",
+      "required": ["symbols", "index_code", "window", "report_period", "timeout_seconds", "repeats"],
+      "additionalProperties": false,
+      "properties": {
+        "symbols": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "index_code": { "type": "string", "minLength": 1 },
+        "window": { "type": "array", "minItems": 2, "items": { "type": "string" } },
+        "report_period": { "type": "string", "minLength": 1 },
+        "timeout_seconds": { "type": "number", "minimum": 0 },
+        "repeats": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "client": { "type": "string", "minLength": 1 },
+    "rate_limit": { "type": "object" },
+    "status_vocabulary": {
+      "type": "object",
+      "required": [
+        "ok",
+        "empty",
+        "not_found",
+        "network",
+        "token",
+        "timeout",
+        "error",
+        "dependency_missing"
+      ],
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    },
+    "endpoints": {
+      "type": "object",
+      "minProperties": 1,
+      "patternProperties": {
+        "^[a-z_]+$": { "$ref": "#/$defs/endpoint_record" }
+      },
+      "additionalProperties": false
+    },
+    "capabilities_observed": {
+      "type": "object",
+      "required": [
+        "daily_bars",
+        "adjustment_factors",
+        "listing_dates",
+        "fundamentals",
+        "fundamentals_announce_date",
+        "industry",
+        "index_members_current",
+        "index_members_historical",
+        "calendar",
+        "suspensions",
+        "price_limits",
+        "st_flags",
+        "delistings",
+        "market_cap",
+        "intraday",
+        "_derivation"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "daily_bars": { "type": "boolean" },
+        "adjustment_factors": { "type": "boolean" },
+        "listing_dates": { "type": "boolean" },
+        "fundamentals": { "type": "boolean" },
+        "fundamentals_announce_date": { "type": "boolean" },
+        "industry": { "type": "boolean" },
+        "index_members_current": { "type": "boolean" },
+        "index_members_historical": { "type": "boolean" },
+        "calendar": { "type": "boolean" },
+        "suspensions": { "type": "boolean" },
+        "price_limits": { "type": "boolean" },
+        "st_flags": { "type": "boolean" },
+        "delistings": { "type": "boolean" },
+        "market_cap": { "type": "boolean" },
+        "intraday": { "type": "boolean" },
+        "_derivation": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "recommendations": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+    "limitations": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+  },
+  "$defs": {
+    "endpoint_record": {
+      "type": "object",
+      "required": [
+        "endpoint",
+        "fn",
+        "dataset",
+        "mapper",
+        "capability",
+        "strategy",
+        "status",
+        "columns",
+        "dtypes",
+        "rows",
+        "elapsed_ms",
+        "elapsed_samples_ms",
+        "attempts",
+        "kwargs",
+        "timeout_passed",
+        "timeout_exceeded",
+        "pagination",
+        "unit",
+        "mapper_check",
+        "sample",
+        "error",
+        "note"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "endpoint": { "type": "string", "minLength": 1 },
+        "fn": { "type": "string", "minLength": 1 },
+        "dataset": { "type": "string", "minLength": 1 },
+        "mapper": { "type": "string", "minLength": 1 },
+        "capability": { "type": ["string", "null"] },
+        "strategy": { "type": "string", "minLength": 1 },
+        "status": {
+          "enum": ["ok", "empty", "not_found", "network", "token", "timeout", "error", "dependency_missing"]
+        },
+        "columns": { "type": "array", "items": { "type": "string" } },
+        "dtypes": { "type": "object", "additionalProperties": { "type": "string" } },
+        "rows": { "type": ["integer", "null"], "minimum": 0 },
+        "elapsed_ms": { "type": ["number", "null"], "minimum": 0 },
+        "elapsed_samples_ms": { "type": "array", "items": { "type": "number", "minimum": 0 } },
+        "attempts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["attempt", "ok", "rows", "elapsed_ms", "error"],
+            "additionalProperties": false,
+            "properties": {
+              "attempt": { "type": "integer", "minimum": 1 },
+              "ok": { "type": "boolean" },
+              "rows": { "type": ["integer", "null"], "minimum": 0 },
+              "elapsed_ms": { "type": "number", "minimum": 0 },
+              "error": { "type": ["string", "null"] }
+            }
+          }
+        },
+        "kwargs": {
+          "type": "object",
+          "additionalProperties": { "type": ["string", "null"] }
+        },
+        "timeout_passed": { "type": "boolean" },
+        "timeout_exceeded": { "type": "boolean" },
+        "pagination": {
+          "type": "object",
+          "required": [
+            "supported",
+            "page_param",
+            "page_size",
+            "attempted",
+            "ok",
+            "rows_in_page",
+            "error",
+            "note"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "supported": { "type": "boolean" },
+            "page_param": { "type": ["string", "null"] },
+            "page_size": { "type": ["integer", "null"] },
+            "attempted": { "type": "boolean" },
+            "ok": { "type": ["boolean", "null"] },
+            "rows_in_page": { "type": ["integer", "null"], "minimum": 0 },
+            "error": { "type": ["string", "null"] },
+            "note": { "type": "string" }
+          }
+        },
+        "unit": {
+          "type": "object",
+          "required": ["volume", "amount", "ratio", "method", "rows_used", "note"],
+          "additionalProperties": false,
+          "properties": {
+            "volume": { "type": "string", "minLength": 1 },
+            "amount": { "type": "string", "minLength": 1 },
+            "ratio": { "type": ["number", "null"], "minimum": 0 },
+            "method": { "type": "string", "minLength": 1 },
+            "rows_used": { "type": "integer", "minimum": 0 },
+            "note": { "type": "string" }
+          }
+        },
+        "mapper_check": {
+          "type": "object",
+          "required": ["ok", "rows", "warnings", "error"],
+          "additionalProperties": false,
+          "properties": {
+            "ok": { "type": ["boolean", "null"] },
+            "rows": { "type": ["integer", "null"], "minimum": 0 },
+            "warnings": { "type": "array", "items": { "type": "string" } },
+            "error": { "type": ["string", "null"] }
+          }
+        },
+        "announce_date_check": {
+          "type": "object",
+          "required": ["column", "present", "non_null_ratio", "pit_ok", "note"],
+          "additionalProperties": false,
+          "properties": {
+            "column": { "type": ["string", "null"] },
+            "present": { "type": "boolean" },
+            "non_null_ratio": { "type": ["number", "null"], "minimum": 0 },
+            "pit_ok": { "type": "boolean" },
+            "note": { "type": "string" }
+          }
+        },
+        "sample": {
+          "type": "object",
+          "required": ["columns", "rows"],
+          "additionalProperties": false,
+          "properties": {
+            "columns": { "type": "array", "items": { "type": "string" } },
+            "rows": {
+              "type": "array",
+              "items": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "error": { "type": ["string", "null"] },
+        "note": { "type": "string" }
+      }
+    }
+  }
+}

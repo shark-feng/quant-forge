@@ -112,6 +112,10 @@ class IngestReport:
     def overall_status(self) -> str
 def ingest_from_provider(provider, *, config, universe_config, index_codes=("000300.SH",),
                          start, end, symbols=None, fundamentals=True, industry=True) -> IngestReport
+
+# ---------------- akshare_provider.py：端点参数构造（M5-1 提升为公开）----------------
+def client_kwargs_for(ep, *, symbol=None, start=None, end=None, adjust="",
+                      report_period=None, industry_name=None, **kwargs) -> dict[str, Any]
 ```
 
 ---
@@ -293,10 +297,13 @@ def ingest_from_provider(provider, *, config, universe_config, index_codes=("000
 ## 9. 已知限制（诚实声明）
 
 1. **AKShare 的接口名与列名是候选值**：M4-8 只交付映射骨架，真实字段名、dtype、分页与限额
-   由使用者在联网环境执行 `tools/probe_akshare.py`（M5）后固化 —— 届时只需改
-   `ENDPOINTS` / `MAPPERS` 两张表（单点修改）；
+   由使用者在联网环境执行 `tools/probe_akshare.py`（M5-1 已交付工具、M5 阶段 B 执行）后固化 ——
+   届时只需改 `ENDPOINTS` / `MAPPERS` 两张表（单点修改）。探测报告格式见
+   `docs/data/probe_report.schema.json`（**M5-1 阶段 A 从未联网**，故候选值仍未核实）；
 2. **AKShare 的联网部分完全未验证**：本仓库没有发出过任何网络请求；
    所有 AKShare 用例都跑 `FakeAKShareClient` + `tests/fixtures/akshare/`（**手工构造的样例**）；
+   探测工具的 `--dry-run` 同样走这套假数据，**只证明脚本自身能执行**（退出码恒 0），
+   不能作为接口可用的证据；
 3. **停牌/涨跌停/ST 历史/退市/市值**在 AKShare 侧尚未实现（能力声明为 `False`，口径已披露）；
 4. **指数成分的历史语义依赖快照累积**：只有我们实际观测过的日期才有成分，
    首次抓取日之前不可得（已在能力 `notes` 与每次调用的 warning 中披露）；

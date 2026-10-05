@@ -125,6 +125,12 @@ def build_rules() -> list[Rule]:
         Rule("README.md", r"\*\*\d+ 个单元测试用例\*\*（\d+ 个测试模块）", "README 概要行"),
         Rule("README.md", r"tests/ {14}单元测试（\d+ 个用例）", "README 目录树"),
         Rule("docs/00_system_design.md", r"合计 \d+ 个单元测试用例", "docs/00 合计行"),
+        Rule(
+            "docs/00_system_design.md",
+            r"(test_\*\.py\s+✅\s*)\d+(\s*个)",
+            "docs/00 目录树模块数",
+            renderer=lambda m, c, mm: f"{m.group(1)}{mm}{m.group(2)}",
+        ),
         Rule("docs/03_acceptance_report.md", r"\|\s*用例总数\s*\|\s*\*\*\d+\*\*\s*\|", "docs/03 用例总数"),
         Rule("docs/03_acceptance_report.md", r"\|\s*测试模块\s*\|\s*\d+\s*个\s*\|", "docs/03 模块数"),
         Rule(

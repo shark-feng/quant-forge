@@ -68,6 +68,14 @@ reports/*
 # 第三方框架交叉验证输出（Backtrader / PyBroker，见 docs/12_framework_matrix.md）
 reports/bench/
 
+# ---- AKShare 探测的 dry-run 产物（**假数据，绝不入库**；真实探测报告才提交）----
+# 理由：dry-run 用 tests/fixtures/akshare/ 的手工构造样例，把它的结论当真实结论
+# 会让「探测通过」变成假的通过（Q2 修正：靠目录与文件名区分，不靠报告里的 mode 字段）。
+# 注意 `docs/data/probe_report.schema.json` 是规格文件，**必须**入库，故不在此忽略。
+docs/data/dry-run/
+*.dry-run.json
+*.dry-run.md
+
 # ---- 密钥与本地凭据（绝不入库）----
 .env
 .env.*

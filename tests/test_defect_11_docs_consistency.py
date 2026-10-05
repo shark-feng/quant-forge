@@ -151,6 +151,40 @@ def test_changelog_case_count_matches_code():
     assert int(match.group(1)) == cases, f"CHANGELOG 写 {match.group(1)}，实际 {cases}"
 
 
+def test_module_counts_in_docs_match_code():
+    """docs 里的**模块数**必须与实际一致：分模块表的行 + `docs/00` 目录树的「test_*.py N 个」。
+
+    实测漂移（三处，全是「不报错」的漂移）：
+
+    - `test_synthetic_parameters.py`（V2）、`test_skip_semantics.py`（V4）、
+      `test_probe_akshare.py`（M5-1）交付后都没有被登记进分模块表 ——
+      `tools/sync_doc_counts.py` 只更新**已存在**的行、不会新增行，
+      于是「总数对得上、逐模块表少几行」不会被任何用例发现；
+    - `docs/00` 目录树的「test_*.py ✅ 52 个」停在 M4，实际已是 55 个。
+    """
+    from tests import run_tests as runner
+
+    text = read(DOCS / "03_acceptance_report.md")
+    rows = {
+        name: int(count)
+        for name, count in re.findall(r"\|\s*`(test_[a-z0-9_]+\.py)`\s*\|\s*(\d+)\s*\|", text)
+    }
+    actual = {
+        path.name: sum(1 for _ in runner._iter_tests(runner._load_module(path)))
+        for path in sorted((PROJECT_ROOT / "tests").glob("test_*.py"))
+    }
+    missing = sorted(name for name in actual if name not in rows)
+    assert not missing, f"docs/03 分模块表缺少以下测试模块：{missing}"
+    mismatched = {
+        name: (rows[name], actual[name]) for name in actual if rows[name] != actual[name]
+    }
+    assert not mismatched, f"docs/03 分模块表的用例数与实际不符（写, 实际）：{mismatched}"
+
+    tree = re.search(r"test_\*\.py\s+✅\s*(\d+)\s*个", read(DOCS / "00_system_design.md"))
+    assert tree, "docs/00 目录树未声明测试模块数"
+    assert int(tree.group(1)) == len(actual), f"docs/00 写 {tree.group(1)} 个模块，实际 {len(actual)}"
+
+
 # --------------------------------------------------------------------------- #
 # 4) 版本号
 # --------------------------------------------------------------------------- #

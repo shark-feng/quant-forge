@@ -10,6 +10,33 @@
 
 ## [Unreleased]
 
+### 新增（第三轮 M5-1：AKShare 端点探测工具，**完全离线可验收**）
+
+- **`tools/probe_akshare.py`**：把 M4-8 的**候选**接口名/列名变成**实测**结论，产出
+  `docs/data/akshare_capability_report.{json,md}`（供 M5-5 在 `ENDPOINTS`/`MAPPERS` 单点修正）。
+  逐端点记录：存在性 / 行数 / **完整列名与 dtype** / 耗时中位数 / 分页签名 / 单位推断 /
+  `mapper_check`（**直接把实测表喂给 M4-8 的映射器**看能否消费，缺列时复用映射器自带的候选列文案）/
+  公告日可用性（缺失即明说「M6 的 PIT 财务因子无法做」，不得用报告期顶替）。
+- **单位推断**：按 `amount/(volume×close)` 的量级判定「手/股 × 元/千元」；实测为「股」时
+  在建议里**明确要求**把 `_DEFAULT_VOLUME_TO_SHARES` 改成 1.0 并写明后果（错 100 倍且不报错）；
+  判不出时报「未知」并禁止上线。后复权表的 `close` 被复权因子放大（fixture 实测 ratio≈50 vs raw≈100），
+  故**单位结论只从 `bars_raw` 推出**，`bars_hfq` 仅作参考。
+- **`--dry-run`（离线验收）**：用 `FakeAKShareClient` + 手工 fixture 走全流程，**退出码恒 0**
+  （脚本自身跑通即通过，可当 CI smoke test）；产物固定在 `docs/data/dry-run/`，**已 gitignore**。
+  真实探测：≥1 个端点 `ok` → 0，**全部失败 → 2**；akshare 未安装时每个端点 `not_found`
+  且写明「为什么失败」（含依赖未满足端点的上游错误原文），脚本不崩。
+- **语义写进 docstring 与报告**：`--timeout` 是**判定超时**（超阈值标 `timeout` 并如实记录耗时），
+  **不是中断调用**；底层签名支持 `timeout` 才透传。`mapper_check` 声明为**只读**
+  （不改入参 / 不发请求 / 不写盘），并有专门用例守住这条声明。
+- **单一实现**：`akshare_provider._client_kwargs` 提升为模块级公开函数 `client_kwargs_for`
+  （provider 与探测共用同一份参数构造），并加交叉用例断言「探测发出的每一次调用，
+  provider 也以**完全相同**的参数发出」——dry-run 正是靠它抓出「拿股票代码查指数成分」的静默空返回。
+- **格式即契约**：`docs/data/probe_report.schema.json`（JSON Schema）+ 15 条离线用例
+  `tests/test_probe_akshare.py`，含轻量校验器（**不引入 jsonschema 依赖**）。
+- 顺带把三处「不报错的文档漂移」纳入机械守护：docs/03 分模块表漏登记 3 个模块
+  （`test_synthetic_parameters` / `test_skip_semantics` / `test_probe_akshare`）、
+  `docs/00` 目录树的模块数停在 M4、`--help` 文案含 GBK 编不出的字符会让 argparse 崩溃。
+
 ### 修复（同 API 不同参数路径产出不同内在状态：`generate_market_data`）
 
 - **标的属性序列与代码分配解耦**（V2）：旧实现所有位置共用一个 `rng` 顺序抽样，
@@ -153,12 +180,12 @@
 
 ### 测试
 
-- 用例数 **398 → 783**（0.1.0 轮次新增 385 条）。按模块点算的构成：
+- 用例数 **398 → 799**（0.1.0 轮次新增 401 条）。按模块点算的构成：
   - 缺陷回归：#13 整手不变量 31 条、#14 跨进程确定性 4 条、#15 字段语义 8 条、#16 运行溯源 11 条；
   - 工程化与文档守护：`test_packaging.py` 20 条、`test_no_mojibake.py` 8 条、
     `test_defect_11_docs_consistency.py` 12 条（含 docs/00、CHANGELOG 数字守护与选型附录指引）；
   - 其余为第二轮缺陷回归（#1~#12）与既有模块用例。
-- 测试：收集 **783** 个用例（54 个测试模块）；环境门控用例以 skip 列出，不计入通过。
+- 测试：收集 **799** 个用例（55 个测试模块）；环境门控用例以 skip 列出，不计入通过。
   M4 阶段新增：配置 7、抽象 8、缓存 14、限流 15、质量 20、provider 实现 8（含 1 条环境门控）。
 
 > 第三轮续接的 5 条新增用例（Q1 的 DROPPED 终态守护 3 条、Q3 上传脚本健壮性 1 条、

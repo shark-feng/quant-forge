@@ -13,9 +13,9 @@
 | 项目 | 结果 |
 | --- | --- |
 | 测试运行方式 | `python tests/run_tests.py`（零依赖运行器，与 pytest 双兼容） |
-| 用例总数 | **783** |
+| 用例总数 | **799** |
 | 本机实测结果 | 通过 781 / **跳过 2** / 失败 0（跳过项为环境门控 + 一条刻意探针；两套运行器实测一致，见 `docs/17` §10） |
-| 测试模块 | 54 个 |
+| 测试模块 | 55 个 |
 | 代码规模 | `src/aqs` 46 个文件约 9.0k 行；`tests` 41 个文件约 6.5k 行 |
 
 > **关于 skip（不要读成通过）**：少数用例是**环境门控**的 —— 例如
@@ -63,7 +63,7 @@
 | `test_defect_09_volume_ratio_guard.py` | 13 | **回归 #9** 量比基准阈值 |
 | `test_defect_10_test_hygiene.py` | 14 | **回归 #10** 测试代码坏味道（AST 守护）+ **收集规则一致性守护**（运行器 ↔ pytest 规则 ↔ unittest 加载器；含继承方法、`@property`、非 `Test*` 类的正反例） |
 | `test_defect_12_demo_scope.py` | 12 | **回归 #12** 数据口径四元组与 CLI |
-| `test_defect_11_docs_consistency.py` | 12 | **回归 #11** 文档与代码一致性（AST/正则守护；含 docs/00 与 CHANGELOG 数字守护、选型待核实项附录指引） |
+| `test_defect_11_docs_consistency.py` | 13 | **回归 #11** 文档与代码一致性（AST/正则守护；含 docs/00 与 CHANGELOG 数字守护、选型待核实项附录指引） |
 | `test_defect_15_order_field_semantics.py` | 8 | **回归 #15** 订单字段语义（final_status / last_reject_reason / 顺延历史） |
 | `test_defect_13_lot_rounding.py` | 31 | **回归 #13** 整手不变量 INV-1~INV-6（削减取整 / 零头过期 / 小数股防线 / 端到端 / DROPPED 终态） |
 | `test_defect_16_provenance.py` | 11 | **回归 #16** 运行溯源（命令/Git/哈希种子写入 summary.json）+ 文档数字一致性 |
@@ -80,6 +80,9 @@
 | `test_akshare_provider.py` | 23 | **M4-8** AKShare 映射骨架（全离线）：**手→股**单位换算、代码归一与非法值报错、复权因子归一（缺失不猜测）、上市日缺失报错、公告日缺失丢行、**快照累积区间闭合/同日幂等**、缓存命中不发请求 / 增量收窄 / 降级回退、重试与失败比例升级、进度审计、能力如实声明（`index_members=False`） |
 | `test_provider_contract.py` | 32 | **M4-9 契约**：4 个 provider × 8 项检查（能力声明↔实际行为 / `missing_required` 边界 / 降级披露自洽 / **成分窗口区间相交** / 字段规范 / 主键唯一 / PIT 列与区间 / `Provenance` 契约）；检查项定义在 mixin 里由子类继承，**由运行器统一收集** |
 | `test_ingest.py` | 15 | **M4-10 适配层**：九步流程与 `step_status` 取值域、`skipped` 仅表示「用户没请求」、可选数据失败**不中止**（`fallback`→degraded / `fail`→failed）、必需步骤失败中止并带步态、上市日策略 strict/proxy 两态、成分缺失的 fallback 开/关两态、**校验错误影响步态 + `has_errors`**、近似披露进 diagnostics 与 quality、D4 口径逐条披露、manifest 空值有解释、**与旧入口 `load_market_data` 的内部状态一致** |
+| `test_synthetic_parameters.py` | 8 | **V2 参数路径**：合成数据的标的属性/价格路径/财务数据都按**标的序号**取随机流（截断标的数或改变顺序都不改变已有标的的序列），并守住空标的与重复标的必须报错 |
+| `test_skip_semantics.py` | 1 | **V4 纪律探针**：一个**故意跳过**的用例，用于在两种运行器下都验证「`compat.skip` 计为 skip 而非通过」（子进程守护见 `test_defect_10_*`） |
+| `test_probe_akshare.py` | 15 | **M5-1** AKShare 端点探测工具（全离线 dry-run）：单位量级判定（手/元 正例、股/元 反例、缺列→未知且禁止上线）、**公告日缺失即「M6 的 PIT 因子做不了」**、`mapper_check` 只读（不改入参/不发请求/不写盘）、观测能力与建议由证据推导、单端点失败不中止、**akshare 缺失 → 全 not_found + 退出码 2 + 说明原因**、状态词表与分页签名分析、CLI 与 GBK 控制台可打印、md/json 状态一致、**探测与 provider 的调用参数逐条一致** |
 
 ---
 
@@ -367,7 +370,7 @@ volume `{industry_exposure:26, max_position_per_symbol:18}`。
 | M2 工程化 | 文件全部交付；**推送由宿主机执行** |
 | **M4 取数层** | **M4-1~M4-10 全部交付**（`102fb3e`…`905dae4`）：抽象 / 缓存 / 限流 / 质量 / 三实现 + AKShare 骨架 / 注册表 / 适配层；成文见 `docs/14_provider_layer.md` |
 | **M4 契约测试** | **4 provider × 8 项 = 32 条**（含区间相交的正反例） |
-| 测试 | **收集 783 个用例**（54 个模块；第一轮 398 → 本轮 783） |
+| 测试 | **收集 799 个用例**（55 个模块；第一轮 398 → 本轮 799） |
 | 新增机械守护 | 整手不变量 / 跨进程确定性 / 乱码编码 / 工程化一致性 / 文档数字一致性 / **收集规则一致性（运行器↔pytest↔unittest）** |
 
 ### 11.1 「不报错、只让结果悄悄失真」类缺陷清单（按三种类型归类）

@@ -61,6 +61,7 @@ __all__ = [
     "MAPPERS",
     "Endpoint",
     "AKShareProvider",
+    "client_kwargs_for",
     "normalize_akshare_symbol",
     "derive_adj_factor",
     "report_periods_for_range",
@@ -644,6 +645,60 @@ def report_periods_for_range(start: DateLike, end: DateLike, *, lookback_days: i
 
 
 # --------------------------------------------------------------------------- #
+# 端点 → 客户端调用参数（**公开**：provider 与探测工具共用同一实现）
+# --------------------------------------------------------------------------- #
+def client_kwargs_for(
+    ep: Endpoint,
+    *,
+    symbol: str | None = None,
+    start: DateLike | None = None,
+    end: DateLike | None = None,
+    adjust: str = "",
+    report_period: DateLike | None = None,
+    industry_name: str | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """逻辑端点 → akshare 调用参数（**候选映射**，集中在 ENDPOINTS + 此处）。
+
+    **为什么是公开函数**：`tools/probe_akshare.py` 必须用与 provider **完全相同**的
+    参数去探测，否则探测结论（列名、单位、分页）对 provider 无效。若探测工具自己
+    再写一份参数构造，两边就会漂移 —— 而漂移的表现是「探测报告说通了、留痕也齐全，
+    实际取数却用错参数」，属于本项目反复出现的「两份实现」缺陷。
+
+    因此这里是**单一实现**：
+
+    - provider 在 :meth:`AKShareProvider._fetch_remote` 里调用它；
+    - 探测工具直接 import 它（不得访问私有名）；
+    - `tests/test_probe_akshare.py::test_probe_uses_same_kwargs_as_provider`
+      会用同一次假客户端调用账，交叉比对「provider 实际发出的参数」与
+      「探测构造的参数」，签名一改就红灯。
+
+    改动本函数会**同时影响取数与探测**，所以任何调整都必须让上面那条用例通过。
+    """
+    if ep.fn == "stock_zh_a_hist":
+        return {
+            "symbol": str(symbol).split(".")[0],
+            "period": "daily",
+            "start_date": pd.Timestamp(start).strftime("%Y%m%d"),
+            "end_date": pd.Timestamp(end).strftime("%Y%m%d"),
+            "adjust": "hfq" if ep.dataset == "bars_hfq" else "",
+        }
+    if ep.fn == "stock_individual_info_em":
+        return {"symbol": str(symbol).split(".")[0]}
+    if ep.fn == "tool_trade_date_hist_sina":
+        return {}
+    if ep.fn == "index_stock_cons_csindex":
+        return {"symbol": str(symbol).split(".")[0]}
+    if ep.fn == "stock_board_industry_name_em":
+        return {}
+    if ep.fn == "stock_board_industry_cons_em":
+        return {"symbol": industry_name}
+    if ep.fn == "stock_yjbb_em":
+        return {"date": pd.Timestamp(report_period).strftime("%Y%m%d")}
+    return dict(kwargs)
+
+
+# --------------------------------------------------------------------------- #
 # Provider
 # --------------------------------------------------------------------------- #
 class AKShareProvider:
@@ -1018,7 +1073,7 @@ class AKShareProvider:
             raise DataError(
                 f"akshare 客户端没有函数 {ep.fn}（接口名是候选值，请探测后在 ENDPOINTS 单点修正）"
             )
-        call_kwargs = self._client_kwargs(
+        call_kwargs = client_kwargs_for(
             ep, symbol=symbol, start=start, end=end, adjust=adjust,
             report_period=report_period, industry_name=industry_name, **kwargs
         )
@@ -1044,34 +1099,6 @@ class AKShareProvider:
     def _on_retry(self, attempt: int, exc: BaseException, delay: float) -> None:
         self._stats["retries"] += 1
         logger.warning("akshare 第 %s 次重试（等待 %.2fs）：%s", attempt, delay, exc)
-
-    @staticmethod
-    def _client_kwargs(
-        ep: Endpoint, *, symbol: str | None, start: DateLike | None, end: DateLike | None,
-        adjust: str, report_period: DateLike | None, industry_name: str | None, **kwargs: Any,
-    ) -> dict[str, Any]:
-        """端点 → akshare 调用参数（**候选映射**，集中在 ENDPOINTS + 此处）。"""
-        if ep.fn == "stock_zh_a_hist":
-            return {
-                "symbol": str(symbol).split(".")[0],
-                "period": "daily",
-                "start_date": pd.Timestamp(start).strftime("%Y%m%d"),
-                "end_date": pd.Timestamp(end).strftime("%Y%m%d"),
-                "adjust": "hfq" if ep.dataset == "bars_hfq" else "",
-            }
-        if ep.fn == "stock_individual_info_em":
-            return {"symbol": str(symbol).split(".")[0]}
-        if ep.fn == "tool_trade_date_hist_sina":
-            return {}
-        if ep.fn == "index_stock_cons_csindex":
-            return {"symbol": str(symbol).split(".")[0]}
-        if ep.fn == "stock_board_industry_name_em":
-            return {}
-        if ep.fn == "stock_board_industry_cons_em":
-            return {"symbol": industry_name}
-        if ep.fn == "stock_yjbb_em":
-            return {"date": pd.Timestamp(report_period).strftime("%Y%m%d")}
-        return dict(kwargs)
 
     def _on_fetch_failure(
         self,
