@@ -13,8 +13,8 @@
 | 项目 | 结果 |
 | --- | --- |
 | 测试运行方式 | `python tests/run_tests.py`（零依赖运行器，与 pytest 双兼容） |
-| 用例总数 | **802** |
-| 本机实测结果 | 通过 **800** / 跳过 **2** / 失败 0（pytest 侧 `800 passed, 2 skipped`，逐项一致） |
+| 用例总数 | **805** |
+| 本机实测结果 | 通过 **803** / 跳过 **2** / 失败 0（pytest 侧 `803 passed, 2 skipped`，逐项一致） |
 | 测试模块 | 55 个 |
 | 代码规模 | `src/aqs` 46 个文件约 9.0k 行；`tests` 41 个文件约 6.5k 行 |
 
@@ -95,7 +95,7 @@
 | `test_ingest.py` | 15 | **M4-10 适配层**：九步流程与 `step_status` 取值域、`skipped` 仅表示「用户没请求」、可选数据失败**不中止**（`fallback`→degraded / `fail`→failed）、必需步骤失败中止并带步态、上市日策略 strict/proxy 两态、成分缺失的 fallback 开/关两态、**校验错误影响步态 + `has_errors`**、近似披露进 diagnostics 与 quality、D4 口径逐条披露、manifest 空值有解释、**与旧入口 `load_market_data` 的内部状态一致** |
 | `test_synthetic_parameters.py` | 8 | **V2 参数路径**：合成数据的标的属性/价格路径/财务数据都按**标的序号**取随机流（截断标的数或改变顺序都不改变已有标的的序列），并守住空标的与重复标的必须报错 |
 | `test_skip_semantics.py` | 1 | **V4 纪律探针**：一个**故意跳过**的用例，用于在两种运行器下都验证「`compat.skip` 计为 skip 而非通过」（子进程守护见 `test_defect_10_*`） |
-| `test_probe_akshare.py` | 18 | **M5-1** AKShare 端点探测工具（全离线 dry-run）：单位量级判定（手/元 正例、股/元 反例、缺列→未知且禁止上线）、**公告日缺失即「M6 的 PIT 因子做不了」**、`mapper_check` 只读（入参深比较 + 禁止 `open`）、观测能力与建议由证据推导、单端点失败不中止、**akshare 缺失 → 全 not_found + 退出码 2 + 说明原因**、状态词表与分页签名分析、CLI 与 GBK 控制台可打印、md/json 状态一致、**探测与 provider 的调用参数逐条一致**、**`--fixture-root` 在 live 模式被拒且拒绝发生在任何调用之前**、**`--end`/`--report-period` 的解析口径与来源标注**（≤ end 的最近**已过**季末） |
+| `test_probe_akshare.py` | 21 | **M5-1** AKShare 端点探测工具（全离线 dry-run）：单位量级判定（手/元 正例、股/元 反例、缺列→未知且禁止上线）、**公告日缺失即「M6 的 PIT 因子做不了」**、`mapper_check` 只读（入参深比较 + 禁止 `open`）、观测能力与建议由证据推导、单端点失败不中止、**akshare 缺失 → 全 not_found + 退出码 2 + 说明原因**、状态词表与分页签名分析、CLI 与 GBK 控制台可打印、md/json 状态一致、**探测与 provider 的调用参数逐条一致**、**`--fixture-root` 在 live 模式被拒且拒绝发生在任何调用之前**、**`--end`/`--report-period` 的解析口径与来源标注**（≤ end 的最近**已过**季末）、**JSON Schema 的 `additionalProperties`/`required`/`type` 真的被执行**（9 种伪造全部拒绝 + 动态端点名的反向对照）、**公开参数构造无死参数**（`adjust` 由 dataset 派生）、**「查谁」按端点语义分派** |
 
 ---
 
@@ -383,7 +383,7 @@ volume `{industry_exposure:26, max_position_per_symbol:18}`。
 | M2 工程化 | 文件全部交付；**推送由宿主机执行** |
 | **M4 取数层** | **M4-1~M4-10 全部交付**（`102fb3e`…`905dae4`）：抽象 / 缓存 / 限流 / 质量 / 三实现 + AKShare 骨架 / 注册表 / 适配层；成文见 `docs/14_provider_layer.md` |
 | **M4 契约测试** | **4 provider × 8 项 = 32 条**（含区间相交的正反例） |
-| 测试 | **收集 802 个用例**（55 个模块；第一轮 398 → 本轮 802） |
+| 测试 | **收集 805 个用例**（55 个模块；第一轮 398 → 本轮 805） |
 | 新增机械守护 | 整手不变量 / 跨进程确定性 / 乱码编码 / 工程化一致性 / 文档数字一致性 / **收集规则一致性（运行器↔pytest↔unittest）** |
 
 ### 11.1 「不报错、只让结果悄悄失真」类缺陷清单（按三种类型归类）

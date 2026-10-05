@@ -55,6 +55,46 @@
   返回空表，进而被误读成「接口不可用」。
 - 用例 15 → 18 条（新增 fixture-root 拒绝、季末边界、日期来源三条）。
 
+### 加固（M5-1 代码审查：2 必修 + 4 建议 + 3 小的）
+
+- **必修 1 —— 前提更正 + 补守护**：审查认为「schema 未声明 `announce_date_check`
+  且校验器不检查 `additionalProperties`」。实测**两条都不成立**：
+  `docs/data/probe_report.schema.json` 第 253 行已把该字段声明为**可选**
+  （故 fundamentals 记录合规、用例不该红），且校验器对 `additionalProperties: false`
+  的执法是真的（9 种伪造全部 REJECTED，含端点记录内、嵌套对象、缺必填、类型错）。
+  但"该执法必须被证明"这一点成立，已补 `test_schema_rejects_undeclared_fields_everywhere`，
+  并加**反向对照**：端点名是动态的，合规的新端点记录**必须通过**（免得后人把
+  `patternProperties` 改成枚举，反过来挡住新增端点）。写这条用例时它先抓出了**我自己**对
+  「未声明端点名」的误解（小写名匹配 pattern → 合规）。
+- **必修 2 —— 删掉死参数（推荐 A）**：`client_kwargs_for` 曾接收 `adjust` 形参却从未使用
+  （实际由 `ep.dataset` 决定）。死参数比没有参数更危险：它让「取数 / 探测」两侧看起来在比对
+  同一个量，实际比的是被忽略的输入 —— 正是「两份错误实现互相印证」。现删除该形参，
+  连带删掉 `_fetch_remote` 的 `adjust`（它只用于转发给死参数）；`_call` 的 `adjust` **保留**
+  （`_cache_key` / `_cache_params` 真的在用）。语义由
+  `test_client_kwargs_for_derives_adjust_from_dataset` 锁定（签名无 `adjust` + 按 dataset 派生）。
+- **顺带发现（本步不改，留给 M5-2 定夺）**：`_cache_params` 记录的 `adjust` 是**请求口径**
+  而非抓取口径 —— `fetch_bars` 在 `adjustment=hfq` 时给 `bars_raw` 也传 `adjust="hfq"`，
+  于是 `bars` 的 `params_hash` 会随 `data.adjustment` 变化（同一份不复权数据被算成两份参数）。
+  影响：切换 `data.adjustment` 会让 `bars` 缓存**莫名 miss 并重抓**（不报错、只是白花配额）。
+  改它会改变既有 `params_hash`（作废现有缓存），故未擅动。现在尚无真实缓存，改的代价接近零。
+- **建议 3 —— dry-run 不再被限流拖慢**：读本地 fixture 没有"对端配额"要保护，
+  原实现照样走 300/min 令牌桶（实测 24 次调用白等 2.6s）。现 dry-run 传 `limiter=None`，
+  并在报告的 `rate_limit.source` 写明**为什么没限流**（免得把 dry-run 耗时当真实接口耗时）；
+  用例同时断言 live 侧仍照配置启用（正向对照，防止"永远关掉"）。
+- **建议 4/5 —— 前提写进文档**：`--dry-run` **依赖仓库里的 `tests/`**（`tests/fake_akshare.py`
+  + fixtures），只用于开发/CI smoke test，**不是生产路径**；命令与相对路径**假设
+  cwd = 项目根**（报告页首新增该口径说明，`invocation.cwd` 一并留痕）。
+- **建议 6 —— README 的用例总数**：它**不是**无人守护的第二维护点 ——
+  `tools/sync_doc_counts.py` 有对应同步规则，`tests/test_defect_11_docs_consistency.py`
+  还用 `re.search(r"(\d+)\s*个单元测试用例")` **要求它存在**（删掉会红）。故保留数字并加注
+  「本行由机器同步 + 守护」。若要 README 不再出现该数字，需要同时改同步规则与守护断言。
+- **小的 3 项**：`derive_recommendations` 的单元素循环改为具名常量
+  `_UNIT_AUTHORITATIVE_ENDPOINT`；「查谁」抽出 `_identifier_for` 作为单一出处
+  （+ `test_identifier_for_picks_index_code_only_for_index_endpoints`）；
+  `_industry_name_from_board` 改为取**第一个非空**板块名（原先死取第 0 行，表头为空时会
+  拿空串去调接口 → 接口返回空表 → 被误读成「行业接口不可用」）。
+- 用例 18 → 21 条。
+
 ### 修复（同 API 不同参数路径产出不同内在状态：`generate_market_data`）
 
 - **标的属性序列与代码分配解耦**（V2）：旧实现所有位置共用一个 `rng` 顺序抽样，
@@ -198,12 +238,12 @@
 
 ### 测试
 
-- 用例数 **398 → 802**（0.1.0 轮次新增 404 条）。按模块点算的构成：
+- 用例数 **398 → 805**（0.1.0 轮次新增 407 条）。按模块点算的构成：
   - 缺陷回归：#13 整手不变量 31 条、#14 跨进程确定性 4 条、#15 字段语义 8 条、#16 运行溯源 11 条；
   - 工程化与文档守护：`test_packaging.py` 20 条、`test_no_mojibake.py` 8 条、
     `test_defect_11_docs_consistency.py` 12 条（含 docs/00、CHANGELOG 数字守护与选型附录指引）；
   - 其余为第二轮缺陷回归（#1~#12）与既有模块用例。
-- 测试：收集 **802** 个用例（55 个测试模块）；环境门控用例以 skip 列出，不计入通过。
+- 测试：收集 **805** 个用例（55 个测试模块）；环境门控用例以 skip 列出，不计入通过。
   M4 阶段新增：配置 7、抽象 8、缓存 14、限流 15、质量 20、provider 实现 8（含 1 条环境门控）。
 
 > 第三轮续接的 5 条新增用例（Q1 的 DROPPED 终态守护 3 条、Q3 上传脚本健壮性 1 条、

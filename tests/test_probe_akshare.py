@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import copy
 import importlib.util
 import json
 import re
@@ -206,9 +207,15 @@ def test_dry_run_writes_reports_into_dry_run_subdir():
         report, markdown = read_report(out_dir)
         assert report["mode"] == "dry-run"
         assert report["akshare_version"] == "dry-run(FakeAKShareClient)"
+        # 建议 3：dry-run 读本地 fixture，不该被 300/min 的令牌桶拖慢 → 不限流，
+        # 且报告必须写明「为什么没限流」（免得把 dry-run 耗时当真实接口耗时）
+        assert report["rate_limit"]["enabled"] is False
+        assert "dry-run" in report["rate_limit"]["source"]
         # 补充 8：页首必须写明 mode=dry-run + fixture 是手工构造
         assert "dry-run" in markdown.splitlines()[2]
         assert "手工构造" in markdown and "不是真实抓取" in markdown
+        # 建议 5：命令与相对路径假设 cwd = 项目根，报告须写明
+        assert "cwd = 项目根" in markdown or "cwd=项目根" in markdown
 
 
 def test_report_satisfies_declared_schema_and_covers_every_endpoint():
@@ -228,6 +235,18 @@ def test_report_satisfies_declared_schema_and_covers_every_endpoint():
     for endpoint_id, record in report["endpoints"].items():
         for key in ("columns", "dtypes", "rows", "elapsed_ms", "unit", "mapper_check", "sample"):
             assert key in record, f"{endpoint_id} 缺少字段 {key}"
+    # fundamentals 独有字段：既要出现在报告里，也必须在 schema 里**声明**（否则
+    # additionalProperties=false 与代码不一致 —— 契约就成了假的）
+    fundamentals = report["endpoints"]["fundamentals"]
+    assert "announce_date_check" in fundamentals, "fundamentals 必须给出公告日核验结果"
+    declared = schema["$defs"]["endpoint_record"]["properties"]
+    assert "announce_date_check" in declared, "schema 未声明 announce_date_check（与代码不一致）"
+    assert "announce_date_check" not in schema["$defs"]["endpoint_record"]["required"], (
+        "公告日核验只有 fundamentals 有，不能列为必填（否则其他端点全不合规）"
+    )
+    assert not validate_schema(fundamentals, schema["$defs"]["endpoint_record"], schema, "$.fundamentals"), (
+        "fundamentals 记录本身必须通过 endpoint_record 契约"
+    )
     # 补充 4：样例只取前 2 行、所有值字符串化、中文不转义（ensure_ascii=False）
     bars = report["endpoints"]["bars_raw"]["sample"]
     assert len(bars["rows"]) == 2
@@ -235,6 +254,152 @@ def test_report_satisfies_declared_schema_and_covers_every_endpoint():
     assert bars["columns"][0] == "日期"
     assert '"成交量"' in raw_text, "JSON 必须用 ensure_ascii=False 写出中文列名"
     assert "\\u" not in raw_text, "中文列名不应被转义成 \\uXXXX"
+
+
+def test_schema_rejects_undeclared_fields_everywhere():
+    """`additionalProperties: false` 必须**真的被执行**（契约不能是假的）。
+
+    背景（M5-1 代码审查）：schema 里写了 `additionalProperties: false`，但若轻量校验器
+    不检查它，那份 schema 就只是"看着严格"的装饰品 —— 报告多出字段、字段改名、
+    嵌套结构漂移都**不会报错**，属于 `docs/DEVELOPMENT.md` §3「契约必须真的被执行」的同类问题。
+
+    这条用例逐个层级伪造字段（顶层 / 端点记录 / 嵌套对象 / 未声明的端点名 / 缺必填 / 类型错），
+    断言校验器**每一种都必须拒绝**。
+    """
+    probe = load_probe_module()
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    with workspace_tmp("probe_schema_guard") as tmp:
+        _, out_dir = run_dry(tmp, probe)
+        report, _ = read_report(out_dir)
+
+    assert not validate_schema(report, schema, schema), "未改动的报告必须合规（反例的前提）"
+
+    def forged(mutate: Any) -> dict[str, Any]:
+        clone = copy.deepcopy(report)
+        mutate(clone)
+        return clone
+
+    cases: Sequence[tuple[str, dict[str, Any], str]] = (
+        ("顶层多一个键", forged(lambda r: r.update({"forged": 1})), "$"),
+        (
+            "端点记录多一个键",
+            forged(lambda r: r["endpoints"]["bars_raw"].update({"forged": 1})),
+            "$.endpoints.bars_raw",
+        ),
+        (
+            "fundamentals 记录多一个键",
+            forged(lambda r: r["endpoints"]["fundamentals"].update({"forged": 1})),
+            "$.endpoints.fundamentals",
+        ),
+        (
+            "嵌套对象 unit 多一个键",
+            forged(lambda r: r["endpoints"]["bars_raw"]["unit"].update({"forged": 1})),
+            "$.endpoints.bars_raw.unit",
+        ),
+        (
+            "嵌套对象 announce_date_check 多一个键",
+            forged(lambda r: r["endpoints"]["fundamentals"]["announce_date_check"].update({"forged": 1})),
+            "$.endpoints.fundamentals.announce_date_check",
+        ),
+        (
+            "数组元素 attempts[0] 多一个键",
+            forged(lambda r: r["endpoints"]["bars_raw"]["attempts"][0].update({"forged": 1})),
+            "$.endpoints.bars_raw.attempts[0]",
+        ),
+        (
+            "未声明的端点名（大写：不匹配 patternProperties）",
+            forged(lambda r: r["endpoints"].update({"Forged": r["endpoints"]["bars_raw"]})),
+            "$.endpoints",
+        ),
+        (
+            "pattern 匹配但记录本身非法（新端点名也必须按 endpoint_record 校验）",
+            forged(
+                lambda r: r["endpoints"].update(
+                    {"forged_endpoint": {**r["endpoints"]["bars_raw"], "rows": "5"}}
+                )
+            ),
+            "$.endpoints.forged_endpoint",
+        ),
+        (
+            "缺 required 字段",
+            forged(lambda r: r["endpoints"]["bars_raw"].pop("rows")),
+            "$.endpoints.bars_raw",
+        ),
+        (
+            "类型不符",
+            forged(lambda r: r["endpoints"]["bars_raw"].update({"rows": "5"})),
+            "$.endpoints.bars_raw.rows",
+        ),
+    )
+    for label, instance, path in cases:
+        errors = validate_schema(instance, schema, schema)
+        assert errors, f"校验器放过了「{label}」—— additionalProperties/required/type 未真正执行"
+        assert any(error.startswith(path) for error in errors), (
+            f"「{label}」的报错路径应指向 {path}，实际 {errors}"
+        )
+
+    # 反向对照：端点名是**动态**的（`ENDPOINTS` 增删端点不该改 schema），
+    # 因此「多一个小写端点名」只要记录本身合规就必须**通过** —— 免得后人把
+    # patternProperties 误改成枚举，反过来把新增端点挡住。
+    extra_ok = forged(
+        lambda r: r["endpoints"].update({"forged_endpoint": copy.deepcopy(r["endpoints"]["calendar"])})
+    )
+    assert not validate_schema(extra_ok, schema, schema), (
+        "端点名是动态的：合规的新端点记录不应被拒绝"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# 2b：公开参数构造契约（不得有死参数）
+# --------------------------------------------------------------------------- #
+def test_client_kwargs_for_derives_adjust_from_dataset():
+    """`adjust` 由 `ep.dataset` 决定，**不是**外部形参（M5-1 代码审查 必修 2）。
+
+    此前 `client_kwargs_for` 接收一个 `adjust` 形参却从不使用：调用方以为自己传的值
+    生效了，交叉用例也"通过"——比对的其实是被忽略的输入（两份错误实现互相印证）。
+    这条用例同时锁两件事：① 签名里不再有 `adjust`；② 语义确实按 dataset 派生。
+    """
+    import inspect
+
+    probe = load_probe_module()
+    parameters = inspect.signature(probe.client_kwargs_for).parameters
+    assert "adjust" not in parameters, (
+        "client_kwargs_for 不应再接收 adjust（死参数会让调用方误以为它生效）"
+    )
+
+    raw = probe.client_kwargs_for(
+        ENDPOINTS["bars_raw"], symbol="600000.SH", start="2022-03-01", end="2022-03-07"
+    )
+    hfq = probe.client_kwargs_for(
+        ENDPOINTS["bars_hfq"], symbol="600000.SH", start="2022-03-01", end="2022-03-07"
+    )
+    assert raw["adjust"] == "" and hfq["adjust"] == "hfq"
+    assert raw["symbol"] == hfq["symbol"] == "600000"
+    assert raw["start_date"] == "20220301" and raw["end_date"] == "20220307"
+
+    # 探测侧的参数构造必须与 direct 调用逐键一致（去掉死参数后，这里才是真的在比对同一件事）
+    ctx = probe.make_context(symbols=("600000.SH",), end="2022-03-07", days=6)
+    for endpoint_id in ("bars_raw", "bars_hfq"):
+        ep = ENDPOINTS[endpoint_id]
+        assert probe._probe_kwargs(ep, ctx, industry_name=None) == probe.client_kwargs_for(
+            ep, symbol="600000.SH", start=ctx.start, end=ctx.end, report_period=ctx.report_period
+        )
+
+
+def test_identifier_for_picks_index_code_only_for_index_endpoints():
+    """「查谁」按端点语义分派：指数成分查指数代码，其余查股票代码（M5-1 小的 2）。
+
+    写错的后果是**静默空返回**（用股票代码查成分 → 空表 → 看起来像「接口没数据」）。
+    """
+    probe = load_probe_module()
+    ctx = probe.make_context(symbols=("600000.SH",), index_code="000300.SH", end="2022-03-07", days=6)
+    index_like = {
+        name for name in ENDPOINTS if probe._identifier_for(ENDPOINTS[name], ctx) == "000300.SH"
+    }
+    assert index_like == {"index_members"}, f"只有指数成分端点该用指数代码，实际 {index_like}"
+    for name in ENDPOINTS:
+        if name != "index_members":
+            assert probe._identifier_for(ENDPOINTS[name], ctx) == "600000.SH"
 
 
 # --------------------------------------------------------------------------- #
@@ -369,6 +534,9 @@ def test_missing_akshare_yields_all_not_found_and_exit_code_two():
         report, markdown = read_report(tmp)  # live 模式：直接写 out 目录
     assert code == 2, "live 模式全部端点失败 → 退出码 2"
     assert report["mode"] == "live" and report["akshare_version"] is None
+    # 正向对照（建议 3）：限流**只**在 dry-run 关掉，live 必须照配置启用
+    assert report["rate_limit"]["enabled"] is True
+    assert report["rate_limit"]["requests_per_minute"] > 0
     statuses = {endpoint_id: record["status"] for endpoint_id, record in report["endpoints"].items()}
     # industry 的依赖（board_list）也失败了 → 它必然是 dependency_missing（未发请求），
     # 但那不是「静默跳过」：备注里必须带上上游错误原文。

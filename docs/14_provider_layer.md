@@ -114,7 +114,8 @@ def ingest_from_provider(provider, *, config, universe_config, index_codes=("000
                          start, end, symbols=None, fundamentals=True, industry=True) -> IngestReport
 
 # ---------------- akshare_provider.py：端点参数构造（M5-1 提升为公开）----------------
-def client_kwargs_for(ep, *, symbol=None, start=None, end=None, adjust="",
+# 注意：**没有 adjust 形参** —— 复权口径由 ep.dataset 派生（bars_hfq → "hfq"，bars_raw → ""）
+def client_kwargs_for(ep, *, symbol=None, start=None, end=None,
                       report_period=None, industry_name=None, **kwargs) -> dict[str, Any]
 ```
 
@@ -308,4 +309,9 @@ def client_kwargs_for(ep, *, symbol=None, start=None, end=None, adjust="",
 4. **指数成分的历史语义依赖快照累积**：只有我们实际观测过的日期才有成分，
    首次抓取日之前不可得（已在能力 `notes` 与每次调用的 warning 中披露）；
 5. **分钟级频率限制**只有配置项（`data.rate_limit`），未做日内配额管理；
-6. **真实数据的单位**（财务可能以万元/亿元返回）未核实，属 M5 必须项。
+6. **真实数据的单位**（财务可能以万元/亿元返回）未核实，属 M5 必须项；
+7. **`_cache_params` 记录的 `adjust` 是「请求口径」而非「抓取口径」**：`fetch_bars` 在
+   `adjustment=hfq` 时给 `bars_raw` 也传 `adjust="hfq"`，于是 `bars` 的 `params_hash`
+   会随 `data.adjustment` 变化（同一份不复权数据被算成两份参数）→ 切换 `data.adjustment`
+   会让 `bars` 缓存莫名 miss 并重抓（**不报错，只是白花配额**）。改它会作废既有缓存，
+   故留待 M5-2（真实抓取落地、尚无生产缓存时）决定。

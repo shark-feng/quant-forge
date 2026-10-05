@@ -45,6 +45,13 @@ M4-8 的 `ENDPOINTS` / `MAPPERS` 里的函数名与中文列名都是**候选值
 
     # 真实探测（联网环境；先装 pip install -e ".[data]"）
     python tools\\probe_akshare.py --out docs/data --symbols 600000,000001 --index 000300.SH
+
+前提与假设
+----------
+- 命令与相对路径（`--out` 等）**假设 cwd = 项目根**；报告里同时记录 `cwd`/`argv` 便于复查；
+- `--dry-run` **依赖 `tests/` 目录存在**（要 import `tests.fake_akshare`，读
+  `tests/fixtures/akshare/`）：它只用于开发与 CI smoke test，**不是生产路径**。
+  真实探测不需要 `tests/`，只需要 `aqs` 可导入（`pip install -e .`）+ 联网。
 """
 
 from __future__ import annotations
@@ -545,23 +552,37 @@ def _client_label(client: Any) -> str:
     return str(getattr(client, "__name__", None) or type(client).__name__)
 
 
+#: 哪些映射器需要**指数代码**而不是股票代码（其余端点一律用股票代码）。
+#: 这张表是「查谁」的单一出处：`_probe_kwargs` 与 `_mapper_context` 都据此取标识符，
+#: 免得两处各写一遍 `ep.mapper == "index_members"` 而慢慢分叉。
+_INDEX_IDENTIFIER_MAPPERS: frozenset[str] = frozenset({"index_members"})
+
+
+def _identifier_for(ep: Endpoint, ctx: ProbeContext) -> str | None:
+    """该端点该「查谁」：指数成分查指数代码，其余查股票代码。
+
+    写错这一处的后果很隐蔽：用股票代码去查指数成分会**安静地返回空表**
+    （端点状态变 `empty`，看起来像「接口没数据」）—— M5-1 的 dry-run 实测踩到过，
+    由 `test_probe_uses_same_kwargs_as_provider` 的调用账比对抓出。
+    """
+    if ep.mapper in _INDEX_IDENTIFIER_MAPPERS:
+        return ctx.index_code
+    return ctx.symbols[0] if ctx.symbols else None
+
+
 def _probe_kwargs(
     ep: Endpoint, ctx: ProbeContext, *, industry_name: str | None
 ) -> dict[str, Any]:
     """探测用的调用参数：**复用 provider 的单一实现**（不得自行拼一套）。
 
-    注意「查谁」这件事按端点语义分派：指数成分查的是**指数代码**，不是股票代码
-    （用 ``ctx.symbols[0]`` 去查指数会安静地返回空表 —— dry-run 实测踩到过）。
+    这里**不传** ``adjust``：复权口径由 `ep.dataset` 决定（`client_kwargs_for` 内部处理）。
+    曾经传过一个被忽略的 ``adjust`` 形参，等于让「探测 / 取数」两侧比对一个死输入。
     """
-    identifier = ctx.index_code if ep.mapper == "index_members" else (
-        ctx.symbols[0] if ctx.symbols else None
-    )
     return client_kwargs_for(
         ep,
-        symbol=identifier,
+        symbol=_identifier_for(ep, ctx),
         start=ctx.start,
         end=ctx.end,
-        adjust="hfq" if ep.dataset == "bars_hfq" else "",
         report_period=ctx.report_period,
         industry_name=industry_name,
     )
@@ -571,7 +592,7 @@ def _mapper_context(
     ep: Endpoint, ctx: ProbeContext, *, industry_name: str | None
 ) -> dict[str, Any]:
     """映射器的上下文参数（与 provider 调用映射器时保持一致的口径）。"""
-    symbol = ctx.symbols[0] if ctx.symbols else None
+    symbol = _identifier_for(ep, ctx)
     snapshot_date = ctx.end.date()
     if ep.mapper in ("bars_raw", "bars_hfq", "symbol_meta"):
         return {"symbol": symbol}
@@ -779,19 +800,28 @@ def _dependency_missing_record(
 
 
 def _industry_name_from_board(record: Mapping[str, Any]) -> tuple[str | None, str]:
-    """从 `board_list` 的探测结果里取一个板块名（不给 industry 端点凭空编参数）。"""
+    """从 `board_list` 的探测结果里取一个**非空**板块名（不给 industry 端点凭空编参数）。
+
+    取「第一个非空值」而不是死取第 0 行第 0 列：表头/首行偶然为空时，硬取会把空串
+    当成板块名去调用，接口返回空表 → 被误读成「行业接口不可用」。
+    """
     status = record.get("status")
     if status not in (STATUS_OK, STATUS_TIMEOUT):
         return None, f"board_list 状态={status}"
-    rows = record.get("sample", {}).get("rows") or []
+    sample = record.get("sample") or {}
+    rows = sample.get("rows") or []
     if not rows:
         return None, "board_list 未返回可读样例行"
-    columns = [str(c) for c in record.get("sample", {}).get("columns", [])]
+    columns = [str(c) for c in sample.get("columns", [])]
+    # 优先找「名称/板块」列；找不到才退回第 0 列
     index = next((i for i, c in enumerate(columns) if "名称" in c or "板块" in c), 0)
-    values = rows[0]
-    if index >= len(values) or not values[index]:
-        return None, "board_list 样例行里取不到板块名"
-    return str(values[index]), f"取自 board_list 首行（{values[index]}）"
+    for row_no, values in enumerate(rows):
+        if index >= len(values):
+            continue
+        candidate = str(values[index]).strip()
+        if candidate:
+            return candidate, f"取自 board_list 第 {row_no + 1} 行（{candidate}）"
+    return None, "board_list 样例行里没有任何非空板块名"
 
 
 # --------------------------------------------------------------------------- #
@@ -863,6 +893,11 @@ def derive_capabilities(endpoints: Mapping[str, Mapping[str, Any]]) -> dict[str,
     return observed
 
 
+#: 单位结论**只从**不复权的 bars_raw 推出：后复权表的 close 被复权因子放大，
+#: ratio 会被同比例缩小（实测 fixture ratio≈50 vs raw≈100），据它下结论会误导。
+_UNIT_AUTHORITATIVE_ENDPOINT = "bars_raw"
+
+
 def derive_recommendations(
     endpoints: Mapping[str, Mapping[str, Any]], capabilities: Mapping[str, Any]
 ) -> list[str]:
@@ -881,12 +916,9 @@ def derive_recommendations(
                 f"→ 核对 ENDPOINTS['{endpoint_id}'].fn"
             )
 
-    # 单位结论只从**不复权**的 bars_raw 推出：后复权表的 close 被复权因子放大，
-    # ratio 会被同比例缩小（实测 fixture ratio≈50 vs raw≈100），据它下结论会误导。
-    for endpoint_id in ("bars_raw",):
-        record = endpoints.get(endpoint_id) or {}
-        if not _observed(record):
-            continue
+    endpoint_id = _UNIT_AUTHORITATIVE_ENDPOINT
+    record = endpoints.get(endpoint_id) or {}
+    if _observed(record):
         unit = record.get("unit") or {}
         volume, amount, ratio = unit.get("volume"), unit.get("amount"), unit.get("ratio")
         if volume == "手":
@@ -993,7 +1025,7 @@ def probe_all(
         "out": str(out_dir),
         "context": ctx.as_dict(),
         "client": _client_label(client),
-        "rate_limit": _rate_limit_summary(limiter),
+        "rate_limit": _rate_limit_summary(limiter, mode=mode),
         "status_vocabulary": dict(STATUS_VOCABULARY),
         "endpoints": endpoints,
         "capabilities_observed": capabilities,
@@ -1003,10 +1035,15 @@ def probe_all(
     return report
 
 
-def _rate_limit_summary(limiter: RateLimiter | None) -> dict[str, Any]:
+def _rate_limit_summary(limiter: RateLimiter | None, *, mode: str = "live") -> dict[str, Any]:
     """把限流配置与**实际等待**写进报告（耗时数字的解释前提）。"""
     if limiter is None:
-        return {"enabled": False, "source": "未构造限流器（探测未限流）"}
+        reason = (
+            "dry-run 读本地 fixture，不触碰网络，故**不限流**"
+            if mode == "dry-run"
+            else "未构造限流器（本次探测未限流）"
+        )
+        return {"enabled": False, "source": reason}
     summary: dict[str, Any] = {
         "enabled": bool(limiter.enabled),
         "requests_per_minute": int(limiter.requests_per_minute),
@@ -1102,6 +1139,11 @@ def render_markdown(report: Mapping[str, Any]) -> str:
     lines.append(
         "- **`mapper_check`**：只读调用 —— 把原始表喂给 `MAPPERS` 看能否消费；"
         "不写缓存、不发新请求、不改全局状态"
+    )
+    lines.append(
+        "- **命令与路径**：`生成命令` 与 `--out` 等相对路径都**假设 cwd = 项目根**"
+        f"（本次 cwd=`{report.get('invocation', {}).get('cwd')}`）；"
+        "复查时请照此还原，否则相对路径会指向别处"
     )
     lines.append("- **状态词表**：")
     for status, meaning in (report.get("status_vocabulary") or {}).items():
@@ -1336,7 +1378,13 @@ def run_probe(
     limiter: RateLimiter | None = None,
     load_error: str | None = None,
 ) -> dict[str, Any]:
-    """按 CLI 参数执行探测（不写文件；写文件由 :func:`write_reports` 负责）。"""
+    """按 CLI 参数执行探测（不写文件；写文件由 :func:`write_reports` 负责）。
+
+    **dry-run 不限流（limiter=None）**：它读本地 fixture，没有"对端配额"需要保护；
+    若也走 300/min 的令牌桶，只会让 CI smoke test 白白慢下来（实测 24 次调用要等 2.6s）。
+    真实探测照常按 `data.rate_limit` 限流。报告里 `rate_limit.source` 会写明是哪种情况，
+    免得读者把 dry-run 的耗时当成真实接口耗时。
+    """
     ctx = make_context(
         symbols=tuple(args.symbols),
         index_code=args.index,
@@ -1346,10 +1394,16 @@ def run_probe(
         timeout=args.timeout,
         repeats=args.repeats,
     )
+    if limiter is not None:
+        effective_limiter = limiter
+    elif mode == "dry-run":
+        effective_limiter = None
+    else:
+        effective_limiter = build_limiter()
     return probe_all(
         client,
         ctx=ctx,
-        limiter=limiter if limiter is not None else build_limiter(),
+        limiter=effective_limiter,
         mode=mode,
         akshare_version=akshare_version,
         out_dir=out_dir,

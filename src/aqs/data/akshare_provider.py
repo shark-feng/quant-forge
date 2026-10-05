@@ -653,7 +653,6 @@ def client_kwargs_for(
     symbol: str | None = None,
     start: DateLike | None = None,
     end: DateLike | None = None,
-    adjust: str = "",
     report_period: DateLike | None = None,
     industry_name: str | None = None,
     **kwargs: Any,
@@ -674,6 +673,13 @@ def client_kwargs_for(
       「探测构造的参数」，签名一改就红灯。
 
     改动本函数会**同时影响取数与探测**，所以任何调整都必须让上面那条用例通过。
+
+    **刻意没有 ``adjust`` 形参**：复权口径由 ``ep.dataset`` 决定
+    （``bars_hfq`` → ``"hfq"``，``bars_raw`` → ``""``）。此前这里有一个 ``adjust``
+    形参被接收却**从未使用**，调用方以为自己传的值生效了 —— 死参数比没有参数更危险：
+    它让「取数 / 探测」两侧看起来在比对同一个量，实际比的是被忽略的输入
+    （「两份错误实现互相印证」的典型）。语义由
+    `tests/test_probe_akshare.py::test_client_kwargs_for_derives_adjust_from_dataset` 锁定。
     """
     if ep.fn == "stock_zh_a_hist":
         return {
@@ -1026,7 +1032,7 @@ class AKShareProvider:
                 fetch_start = covered_until + timedelta(days=1)
 
         try:
-            fresh = self._fetch_remote(ep, symbol=symbol, start=fetch_start, end=end, adjust=adjust,
+            fresh = self._fetch_remote(ep, symbol=symbol, start=fetch_start, end=end,
                                        report_period=report_period, industry_name=industry_name,
                                        **client_kwargs)
         except DataError:
@@ -1064,9 +1070,14 @@ class AKShareProvider:
 
     def _fetch_remote(
         self, ep: Endpoint, *, symbol: str | None, start: DateLike | None, end: DateLike | None,
-        adjust: str, report_period: DateLike | None, industry_name: str | None, **kwargs: Any,
+        report_period: DateLike | None, industry_name: str | None, **kwargs: Any,
     ) -> pd.DataFrame:
-        """限流 + 重试的真实调用（**唯一触碰客户端的地方**）。"""
+        """限流 + 重试的真实调用（**唯一触碰客户端的地方**）。
+
+        注意：这里**不接收** ``adjust`` —— 复权口径由 ``ep.dataset`` 决定
+        （见 :func:`client_kwargs_for`）。缓存 key/参数里的 ``adjust`` 是另一件事，
+        由 :meth:`_call` 负责。
+        """
         client = self._client_or_raise()
         fn = getattr(client, ep.fn, None)
         if fn is None:
@@ -1074,7 +1085,7 @@ class AKShareProvider:
                 f"akshare 客户端没有函数 {ep.fn}（接口名是候选值，请探测后在 ENDPOINTS 单点修正）"
             )
         call_kwargs = client_kwargs_for(
-            ep, symbol=symbol, start=start, end=end, adjust=adjust,
+            ep, symbol=symbol, start=start, end=end,
             report_period=report_period, industry_name=industry_name, **kwargs
         )
 

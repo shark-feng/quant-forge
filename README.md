@@ -36,7 +36,11 @@
 | R2-08 | 偏差与压力测试套件 | ⏳ 待设计 |
 | R2-09 | 第二阶段设计（多因子 / 优化 / GARCH / 协整） | ⏳ 待设计 |
 
-测试：**802 个单元测试用例**（55 个测试模块）。
+测试：**805 个单元测试用例**（55 个测试模块）。
+
+> 这一行的两个数字由 `tools/sync_doc_counts.py` **自动同步**，并由
+> `tests/test_defect_11_docs_consistency.py` 的红灯守护（手改无效、过期即失败），
+> 所以它是"机器维护点"而不是需要你记得改的第二处口径。
 
 > **关于 skip**：少数用例是**环境门控**的（例如「pyarrow 缺失时应报错并给出安装提示」这类
 > 负面路径用例，在已装 pyarrow 的机器上无法成立）。运行器会单独列出跳过项与原因，
@@ -125,8 +129,11 @@ python tools\probe_akshare.py --out reports\_probe
 
 > 离线自检（**不装 akshare、不联网**、退出码恒 0，可当 CI smoke test）：
 > `python tools\probe_akshare.py --dry-run`，产物落在 `<--out>\dry-run\`（假数据，已 gitignore）。
+> 该模式**依赖仓库里的 `tests/`**（`tests/fake_akshare.py` + `tests/fixtures/akshare/`），
+> 只用于开发与 CI smoke test，**不是生产路径**；真实探测不需要 `tests/`。
 > `--timeout` 是**判定超时**（超过即标 `timeout` 并记录耗时），**不中断调用**；
 > 想量耗时中位数用 `--repeats 3`（默认 1 次，避免触发对端限流）。
+> 报告里记的 `cwd` 与命令**假设在项目根执行**（相对路径如 `reports\_probe` 以此为基准）。
 
 ### 3. 抓取数据到本地缓存
 
@@ -187,7 +194,7 @@ src/aqs/
   strategy/         指标库 + 均线交叉/价格突破/成交量配合 + 配置驱动注册表
   portfolio/        仓位计算（等权/凯利）+ 目标权重组合 + 注册表
   risk/             规则引擎 + 13 条风控规则 + VaR/ES + 验收指标
-tests/              单元测试（802 个用例）
+tests/              单元测试（805 个用例）
 tools/              诊断与数据工具（口径体检 / 订单时间线 / 确定性比对 / AKShare 探测与抓取）
 LICENSE             MIT
 NOTICE              第三方署名、依赖清单、合规声明
